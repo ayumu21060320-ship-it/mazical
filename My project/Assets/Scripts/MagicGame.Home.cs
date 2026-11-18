@@ -14,8 +14,8 @@ using MagicBattle;
 public partial class MagicGame
 {
     RectTransform homeLayer, charLayer, bookLayer, howToLayer, virusLayer;
-    Text homeBadgeText;
-    GameObject homeBadge;
+    Text homeBadgeText, mailBadgeText;
+    GameObject homeBadge, mailBadge;
     Text howToTitle, howToBody, howToPage;
     RectTransform howToPicture;
     int howToIndex;
@@ -30,6 +30,7 @@ public partial class MagicGame
         charLayer.gameObject.SetActive(false);
         bookLayer.gameObject.SetActive(false);
         virusLayer.gameObject.SetActive(false);
+        mailLayer.gameObject.SetActive(false);
         howToLayer.gameObject.SetActive(false);
         programScreen.SetActive(false);
     }
@@ -90,21 +91,33 @@ public partial class MagicGame
             ("キャラクター", "AI ロボットの特性を見る", ShowCharacters),
             ("ブロック図鑑", "プログラムのブロックを調べる", ShowBlockBook),
             ("ウイルス図鑑", "弱点・耐性・特性を調べる", ShowVirusBook),
+            ("メールボックス", "依頼主からのお礼のメール", ShowMailbox),
             ("タイトルへ", "", ShowTitle),
         };
         for (int i = 0; i < items.Length; i++)
         {
             var it = items[i];
             bool main = i == 0;
-            var b = CommandButton(homeLayer, it.label, main ? 56 : 46, it.act, main);
+            var b = CommandButton(homeLayer, it.label, main ? 52 : 40, it.act, main);
             var rt = (RectTransform)b.transform;
             bool last = i == items.Length - 1;
-            float top = 0.82f - i * 0.145f;
-            Anchor(rt, 0.56f + i * 0.012f, top - (last ? 0.08f : 0.115f), 0.95f, top);
+            float top = 0.84f - i * 0.125f;
+            Anchor(rt, 0.56f + i * 0.01f, top - (last ? 0.07f : 0.1f), 0.95f, top);
             if (it.sub != "")
             {
                 var sub = MakeText(rt, it.sub, 22, main ? Color.white : UiKit.Hex("a8f4ff"), TextAnchor.LowerRight, false);
                 Anchor(sub.rectTransform, 0, 0, 1, 1, 0, 8, -40, 0);
+            }
+            if (it.label == "メールボックス")
+            {
+                var mb = Img(rt, UiKit.Circle(), UiKit.Hex("e8283c"));
+                mb.rectTransform.anchorMin = mb.rectTransform.anchorMax = new Vector2(0.97f, 0.95f);
+                mb.rectTransform.sizeDelta = new Vector2(48, 48);
+                var mol = mb.gameObject.AddComponent<Outline>();
+                mol.effectColor = Color.white;
+                mol.effectDistance = new Vector2(3, -3);
+                mailBadgeText = MakeText(mb.rectTransform, "", 28, Color.white, TextAnchor.MiddleCenter, true);
+                mailBadge = mb.gameObject;
             }
             if (main)
             {
@@ -145,6 +158,10 @@ public partial class MagicGame
         foreach (var r in Requests.All) if (!IsCleared(r)) n++;
         homeBadge.SetActive(n > 0);
         homeBadgeText.text = n.ToString();
+        int mailsNew = UnreadMails();
+        mailBadge.SetActive(mailsNew > 0);
+        mailBadgeText.text = mailsNew.ToString();
+        if (mailsNew > 0) StartCoroutine(Toast(homeLayer, "新しいメールが " + mailsNew + " 件あります"));
     }
 
     // ================= キャラクター =================
@@ -152,8 +169,19 @@ public partial class MagicGame
     void BuildCharacters()
     {
         charLayer = MenuScreen("Characters", "キャラクター");
-        var list = NewRect(charLayer, "List");
-        Anchor(list, 0.03f, 0.14f, 0.97f, 0.86f);
+        charList = NewRect(charLayer, "List");
+        Anchor(charList, 0.03f, 0.14f, 0.97f, 0.86f);
+        var back = CommandButton(charLayer, "ホームへ", 32, ShowHome, false);
+        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
+    }
+
+    RectTransform charList;
+
+    // カードを作り直す（レベルが変わるので開くたびに）
+    void FillCharacters()
+    {
+        var list = charList;
+        ClearChildren(list);
         int slots = 5;   // 3 人 ＋ まだ仲間になっていない 2 人
         for (int i = 0; i < slots; i++)
         {
@@ -172,7 +200,19 @@ public partial class MagicGame
                 Anchor(art.rectTransform, 0.08f, 0.45f, 0.92f, 0.97f);
                 var name = MakeText(c, ch.Name, 40, Purple, TextAnchor.MiddleCenter, true);
                 Anchor(name.rectTransform, 0, 0.37f, 1, 0.45f);
-                var info = MakeText(c, "HP " + ch.Hp + "　メモリ " + ch.Capacity + "\n<color=#e0408a>" + TraitText(ch) + "</color>", 24, Ink, TextAnchor.UpperCenter, true);
+                int lv = Levels.LevelOf(GetXp(ch.Art), out int into, out int need);
+                var lvText = MakeText(c, "Lv." + lv, 30, Pink, TextAnchor.UpperLeft, true);
+                Anchor(lvText.rectTransform, 0, 1, 0, 1, 16, -50, 140, -10);
+                var xpBack = Img(c, UiKit.RoundRect(6), UiKit.Hex("e8e0f0"));
+                xpBack.type = Image.Type.Sliced;
+                Anchor(xpBack.rectTransform, 0.08f, 0.455f, 0.92f, 0.47f);
+                var xpFill = Img(xpBack.rectTransform, UiKit.RoundRect(6), UiKit.Hex("ffb32a"));
+                xpFill.type = Image.Type.Filled;
+                xpFill.fillMethod = Image.FillMethod.Horizontal;
+                xpFill.fillAmount = (float)into / need;
+                Fill(xpFill.rectTransform);
+                int hp = ch.Hp + (lv - 1) * Levels.HpPerLevel, mem = ch.Capacity + (lv - 1) * Levels.MemoryPerLevel + MemoryBonus;
+                var info = MakeText(c, "HP " + hp + "　メモリ " + mem + "\n<color=#e0408a>" + TraitText(ch) + "</color>", 24, Ink, TextAnchor.UpperCenter, true);
                 info.supportRichText = true;
                 Anchor(info.rectTransform, 0.04f, 0.24f, 0.96f, 0.37f);
                 var desc = MakeText(c, ch.Description, 21, Ink, TextAnchor.UpperLeft, false);
@@ -189,8 +229,6 @@ public partial class MagicGame
                 Anchor(d.rectTransform, 0.07f, 0.05f, 0.93f, 0.35f);
             }
         }
-        var back = CommandButton(charLayer, "ホームへ", 32, ShowHome, false);
-        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
     }
 
     static string TraitText(RobotInfo c) =>
@@ -200,6 +238,7 @@ public partial class MagicGame
     {
         HideScreens();
         charLayer.gameObject.SetActive(true);
+        FillCharacters();
     }
 
     // ================= ブロック図鑑 =================

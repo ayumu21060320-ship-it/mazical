@@ -1,6 +1,6 @@
 // ホーム画面と、そこから開く画面
-//   ホーム:       タイトルの「スタート」のあと。依頼・キャラクター・ブロック図鑑を選ぶ。右上の歯車で遊び方
-//   キャラクター: 味方の AI ロボットの説明（HP・メモリ・特性）。まだ仲間になっていないキャラは「？？？」
+//   ホーム:       タイトルの「スタート」のあと。依頼・チーム編成・図鑑・メールボックスを選ぶ。右上の歯車で遊び方
+//   チーム編成:   出撃メンバーと装備（MagicGame.Team.cs）
 //   ブロック図鑑: プログラムのブロックの説明。リンク専用と、まだ使えないブロック（条件分岐・繰り返し）も載せる
 //   遊び方:       ページをめくって読む説明
 //   ハッキング:   依頼を選んだあと、相手のパソコンにつないで直そうとするが、ウイルスがエラーを起こして抵抗し、戦闘になる
@@ -13,7 +13,7 @@ using MagicBattle;
 
 public partial class MagicGame
 {
-    RectTransform homeLayer, charLayer, bookLayer, howToLayer, virusLayer;
+    RectTransform homeLayer, bookLayer, howToLayer, virusLayer;
     Text homeBadgeText, mailBadgeText;
     GameObject homeBadge, mailBadge;
     Text howToTitle, howToBody, howToPage;
@@ -27,7 +27,8 @@ public partial class MagicGame
         battleLayer.gameObject.SetActive(false);
         requestLayer.gameObject.SetActive(false);
         homeLayer.gameObject.SetActive(false);
-        charLayer.gameObject.SetActive(false);
+        teamLayer.gameObject.SetActive(false);
+        loadoutLayer.gameObject.SetActive(false);
         bookLayer.gameObject.SetActive(false);
         virusLayer.gameObject.SetActive(false);
         mailLayer.gameObject.SetActive(false);
@@ -88,7 +89,7 @@ public partial class MagicGame
         var items = new (string label, string sub, UnityEngine.Events.UnityAction act)[]
         {
             ("依頼", "ウイルスに困っている人を助ける", ShowRequests),
-            ("キャラクター", "AI ロボットの特性を見る", ShowCharacters),
+            ("チーム編成", "出撃メンバーと装備を決める", ShowTeam),
             ("ブロック図鑑", "プログラムのブロックを調べる", ShowBlockBook),
             ("ウイルス図鑑", "弱点・耐性・特性を調べる", ShowVirusBook),
             ("メールボックス", "依頼主からのお礼のメール", ShowMailbox),
@@ -164,82 +165,10 @@ public partial class MagicGame
         if (mailsNew > 0) StartCoroutine(Toast(homeLayer, "新しいメールが " + mailsNew + " 件あります"));
     }
 
-    // ================= キャラクター =================
-
-    void BuildCharacters()
-    {
-        charLayer = MenuScreen("Characters", "キャラクター");
-        charList = NewRect(charLayer, "List");
-        Anchor(charList, 0.03f, 0.14f, 0.97f, 0.86f);
-        var back = CommandButton(charLayer, "ホームへ", 32, ShowHome, false);
-        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
-    }
-
-    RectTransform charList;
-
-    // カードを作り直す（レベルが変わるので開くたびに）
-    void FillCharacters()
-    {
-        var list = charList;
-        ClearChildren(list);
-        int slots = 5;   // 3 人 ＋ まだ仲間になっていない 2 人
-        for (int i = 0; i < slots; i++)
-        {
-            var border = Img(list, UiKit.RoundRect(26), i < Characters.All.Length ? Purple : UiKit.Hex("8a8fa0"));
-            border.type = Image.Type.Sliced;
-            Anchor(border.rectTransform, i / (float)slots + 0.006f, 0, (i + 1) / (float)slots - 0.006f, 1);
-            var card = Img(border.rectTransform, UiKit.RoundRect(22), new Color(1, 1, 1, 0.94f));
-            card.type = Image.Type.Sliced;
-            var c = card.rectTransform;
-            Anchor(c, 0, 0, 1, 1, 5, 5, -5, -5);
-            if (i < Characters.All.Length)
-            {
-                var ch = Characters.All[i];
-                var art = Img(c, UiKit.Art(ch.Art + "_idle"), Color.white);
-                art.preserveAspect = true;
-                Anchor(art.rectTransform, 0.08f, 0.45f, 0.92f, 0.97f);
-                var name = MakeText(c, ch.Name, 40, Purple, TextAnchor.MiddleCenter, true);
-                Anchor(name.rectTransform, 0, 0.37f, 1, 0.45f);
-                int lv = Levels.LevelOf(GetXp(ch.Art), out int into, out int need);
-                var lvText = MakeText(c, "Lv." + lv, 30, Pink, TextAnchor.UpperLeft, true);
-                Anchor(lvText.rectTransform, 0, 1, 0, 1, 16, -50, 140, -10);
-                var xpBack = Img(c, UiKit.RoundRect(6), UiKit.Hex("e8e0f0"));
-                xpBack.type = Image.Type.Sliced;
-                Anchor(xpBack.rectTransform, 0.08f, 0.455f, 0.92f, 0.47f);
-                var xpFill = Img(xpBack.rectTransform, UiKit.RoundRect(6), UiKit.Hex("ffb32a"));
-                xpFill.type = Image.Type.Filled;
-                xpFill.fillMethod = Image.FillMethod.Horizontal;
-                xpFill.fillAmount = (float)into / need;
-                Fill(xpFill.rectTransform);
-                int hp = ch.Hp + (lv - 1) * Levels.HpPerLevel, mem = ch.Capacity + (lv - 1) * Levels.MemoryPerLevel + MemoryBonus;
-                var info = MakeText(c, "HP " + hp + "　メモリ " + mem + "\n<color=#e0408a>" + TraitText(ch) + "</color>", 24, Ink, TextAnchor.UpperCenter, true);
-                info.supportRichText = true;
-                Anchor(info.rectTransform, 0.04f, 0.24f, 0.96f, 0.37f);
-                var desc = MakeText(c, ch.Description, 21, Ink, TextAnchor.UpperLeft, false);
-                Anchor(desc.rectTransform, 0.07f, 0.02f, 0.93f, 0.24f);
-            }
-            else
-            {
-                var sil = Img(c, UiKit.Art("red_idle"), new Color(0.2f, 0.18f, 0.28f, 0.9f));   // シルエット
-                sil.preserveAspect = true;
-                Anchor(sil.rectTransform, 0.08f, 0.45f, 0.92f, 0.97f);
-                var q = MakeText(c, "？？？", 40, UiKit.Hex("6a6e84"), TextAnchor.MiddleCenter, true);
-                Anchor(q.rectTransform, 0, 0.37f, 1, 0.45f);
-                var d = MakeText(c, "まだ仲間になっていない。\n依頼をこなすと、新しい AI ロボットが仲間になるかも…？（準備中）", 21, UiKit.Hex("6a6e84"), TextAnchor.UpperCenter, false);
-                Anchor(d.rectTransform, 0.07f, 0.05f, 0.93f, 0.35f);
-            }
-        }
-    }
+    // ================= キャラクターの特性の文字 =================
 
     static string TraitText(RobotInfo c) =>
         c.Trait == Trait.FireUp ? "炎属性 火力UP" : c.Trait == Trait.IceUp ? "氷属性 火力UP" : "メモリ容量UP";
-
-    void ShowCharacters()
-    {
-        HideScreens();
-        charLayer.gameObject.SetActive(true);
-        FillCharacters();
-    }
 
     // ================= ブロック図鑑 =================
 
@@ -256,8 +185,8 @@ public partial class MagicGame
             (3, "発射方法（回打つ）", "1〜3 回。回数が多いほどメモリを使う", ""),
             (4, "追加効果を得る", "爆破（威力 1.3 倍）・回復（自分の HP）・スロー（敵のタイムラインを戻す）。無くてもよい", ""),
             (5, "マジカルリンク", "残りのメモリを全部使って、コンビ魔法の威力を上げる（最大 2 倍）", "リンク専用"),
-            (-1, "もし〜なら（条件分岐）", "敵に合わせて属性や回数を変えられる", "まだ使えない"),
-            (-1, "〜回繰り返す", "決めた回数だけ、処理をくり返す", "まだ使えない"),
+            (-2, "もし〜なら（条件分岐）", "条件（敵の弱点・敵の数・自分のHP）で中のブロックを切りかえる。でなければ つき", "装備で使える"),
+            (-3, "〜回繰り返す", "中の「発射方法」を決めた回数だけくり返す。メモリは1回分ですむ", "装備で使える"),
         };
         for (int i = 0; i < entries.Length; i++)
         {
@@ -266,7 +195,7 @@ public partial class MagicGame
             var cell = Img(list, UiKit.RoundRect(18), new Color(1, 1, 1, 0.92f));
             cell.type = Image.Type.Sliced;
             Anchor(cell.rectTransform, col * 0.5f + 0.005f, 1f - (row + 1) * 0.25f + 0.008f, (col + 1) * 0.5f - 0.005f, 1f - row * 0.25f - 0.008f);
-            var block = Img(cell.rectTransform, UiKit.BlockShape(), e.color >= 0 ? BlockColors[e.color] : UiKit.Hex("9a9eb0"));
+            var block = Img(cell.rectTransform, UiKit.BlockShape(), e.color >= 0 ? BlockColors[e.color] : e.color == -2 ? UiKit.Hex("ffab19") : e.color == -3 ? UiKit.Hex("f0801e") : UiKit.Hex("9a9eb0"));
             block.type = Image.Type.Sliced;
             Anchor(block.rectTransform, 0, 0.5f, 0, 0.5f, 20, -36, 330, 30);
             var bn = MakeText(block.rectTransform, e.name, 24, Color.white, TextAnchor.MiddleLeft, true);
@@ -275,7 +204,7 @@ public partial class MagicGame
             Anchor(desc.rectTransform, 0, 0, 1, 1, 350, 6, -16, -6);
             if (e.tag != "")
             {
-                var tag = Img(cell.rectTransform, UiKit.RoundRect(10), e.color >= 0 ? Pink : UiKit.Hex("6a6e84"));
+                var tag = Img(cell.rectTransform, UiKit.RoundRect(10), e.color >= 0 ? Pink : UiKit.Hex("f0801e"));
                 tag.type = Image.Type.Sliced;
                 Anchor(tag.rectTransform, 1, 1, 1, 1, -170, -40, -12, -8);
                 MakeText(tag.rectTransform, e.tag, 20, Color.white, TextAnchor.MiddleCenter, true);
@@ -361,6 +290,8 @@ public partial class MagicGame
          "「バトル開始」でタイムラインが進む。右端に着いたキャラから行動する。\n全員が 1 回以上行動するとターンが終わり、またプログラムを組み直せる。\n\n速いキャラは、同じターンに 2 回行動できることもある。", "timeline"),
         ("ウイルスの弱点・耐性・特性",
          "ウイルスには弱点（1.5 倍効く属性）と耐性（0.5 倍しか効かない属性）がある。\n敵の頭の上や、ホームの「ウイルス図鑑」で確かめよう。\n\n増殖・ロック・分散などの特性もある。弱点をつくと「WEAK!」と出る。", "virus"),
+        ("もし〜なら・〜回繰り返す",
+         "チーム編成の「装備」で追加ブロックをはめると、そのロボットのプログラムで使える。\n\nもし ＜条件＞ なら … でなければ … ：条件で中のブロックを切りかえる。\n〜回繰り返す … ：中の「発射方法」をその回数だけくり返す。メモリは1回分！", "blocks"),
         ("チャージとリンクプログラム",
          "チャージ：そのターンは魔法を打たず、次のターンのメモリと攻撃力が 1.3 倍。\n\nリンクプログラム（1 試合 2 回）：ペアを選んで 2 人分のメモリで魔法を組む。\n属性 2 つ・威力 200/400・マジカルリンクが使える切り札！", "link"),
     };

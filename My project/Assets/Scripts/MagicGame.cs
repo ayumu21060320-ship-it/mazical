@@ -145,7 +145,8 @@ public partial class MagicGame : MonoBehaviour
         BuildBattle();
         BuildRequests();
         BuildHome();
-        BuildCharacters();
+        BuildTeam();
+        BuildLoadout();
         BuildBlockBook();
         BuildVirusBook();
         BuildMailbox();
@@ -197,6 +198,11 @@ public partial class MagicGame : MonoBehaviour
     void OnRequestChosen(Request r)
     {
         if (phase != Phase.Requests || connecting) return;
+        if (LoadParty().Count < Mathf.Min(3, Characters.All.Length))
+        {
+            StartCoroutine(Toast(requestLayer, "チーム編成で出撃メンバーを 3 人選んでください"));
+            return;
+        }
         currentRequest = r;
         StartCoroutine(Connect(r));
     }
@@ -213,7 +219,7 @@ public partial class MagicGame : MonoBehaviour
         noise.color = new Color(1, 1, 1, 0);
         busy = false;
         flying = 0;
-        battle = new Battle(System.Environment.TickCount, currentRequest, LevelMap(), MemoryBonus);
+        battle = new Battle(System.Environment.TickCount, currentRequest, LevelMap(), MemoryBonus, LoadoutMap(), LoadParty());
         drafts.Clear();
         linkDrafts.Clear();
         int carried = 0;
@@ -234,6 +240,9 @@ public partial class MagicGame : MonoBehaviour
         for (int i = 0; i < robotTabs.Count; i++)
         {
             var t = robotTabs[i];
+            bool has = i < battle.Allies.Count;
+            t.bg.gameObject.SetActive(has);
+            if (!has) continue;
             robotTabs[i] = (battle.Allies[i], t.bg, t.text, t.face);
             t.face.sprite = UiKit.Art(battle.Allies[i].Art + "_idle", FaceCrop);
         }
@@ -455,23 +464,55 @@ public partial class MagicGame : MonoBehaviour
     {
         var code = CurrentCode();
         bool overCode = RectTransformUtility.RectangleContainsScreenPoint(codeArea, screenPos, null);
-        int from = view.FromPalette ? -1 : code.IndexOf(view.Data);
-        if (from >= 0) code.RemoveAt(from);
-        if (overCode)
+        // 置く場所：マウスより上にあるコードの行の数（はじめに数える）
+        int k = 0;
+        foreach (Transform row in codeList)
         {
-            int index = code.Count;
-            int childIndex = 0;
-            for (int i = 0; i < codeList.childCount; i++)
+            var bv = row.GetComponentInChildren<BlockView>();
+            if (bv == null) continue;
+            if (((RectTransform)row).position.y > screenPos.y) k++;
+        }
+        k = Mathf.Min(k, code.Count);
+
+        if (view.FromPalette)
+        {
+            if (!overCode) { RefreshProgram(); return; }
+            var group = new List<Block> { view.Data.Clone() };
+            if (view.Data.Kind == BlockKind.If) { group.Add(new Block(BlockKind.Else)); group.Add(new Block(BlockKind.EndIf)); }
+            if (view.Data.Kind == BlockKind.Repeat) group.Add(new Block(BlockKind.EndRepeat));
+            code.InsertRange(k, group);
+        }
+        else
+        {
+            // 「もし」「繰り返す」は中のブロックごと動かす
+            int a = code.IndexOf(view.Data);
+            if (a < 0) { RefreshProgram(); return; }
+            int b = GroupEnd(code, a);
+            var group = code.GetRange(a, b - a + 1);
+            if (!overCode) code.RemoveRange(a, b - a + 1);           // コードの外へ出したら消す
+            else if (k < a || k > b + 1)
             {
-                var child = (RectTransform)codeList.GetChild(i);
-                var bv = child.GetComponent<BlockView>();
-                if (bv == null || bv == view) continue;
-                if (screenPos.y > child.position.y) { index = childIndex; break; }
-                childIndex++;
+                code.RemoveRange(a, b - a + 1);
+                if (k > b) k -= group.Count;
+                code.InsertRange(k, group);
             }
-            code.Insert(Mathf.Min(index, code.Count), view.FromPalette ? view.Data.Clone() : view.Data);
         }
         RefreshProgram();
+    }
+
+    // 「もし」「繰り返す」なら対応する「おわり」の場所。ふつうのブロックはそのまま
+    static int GroupEnd(List<Block> code, int a)
+    {
+        var kind = code[a].Kind;
+        if (kind != BlockKind.If && kind != BlockKind.Repeat) return a;
+        int depth = 0;
+        for (int i = a; i < code.Count; i++)
+        {
+            var kk = code[i].Kind;
+            if (kk == BlockKind.If || kk == BlockKind.Repeat) depth++;
+            if (kk == BlockKind.EndIf || kk == BlockKind.EndRepeat) { depth--; if (depth == 0) return i; }
+        }
+        return code.Count - 1;
     }
 
     public void OnBlockValueClicked(BlockView view)
@@ -546,6 +587,11 @@ public partial class MagicGame : MonoBehaviour
     {
         ClearChildren(paletteList);
         foreach (var k in linkMode ? Blocks.LinkOrder : Blocks.Order) MakeBlock(paletteList, new Block(k), true);
+        // 装備した追加ブロック（リンクのときは2人分）
+        bool hasIf = editing.HasMod(Modules.If) || (linkMode && linkPartner.HasMod(Modules.If));
+        bool hasRepeat = editing.HasMod(Modules.Repeat) || (linkMode && linkPartner.HasMod(Modules.Repeat));
+        if (hasIf) MakeBlock(paletteList, new Block(BlockKind.If), true);
+        if (hasRepeat) MakeBlock(paletteList, new Block(BlockKind.Repeat), true);
         paletteHint = MakeText(paletteList, linkMode
             ? "リンク：メモリ2人分・属性ブロック2つまで・威力200/400が使える。マジカルリンクは残りのメモリ全部で威力アップ"
             : "ドラッグして右のコードへ。\n▼ をクリックで中身が変わる", 20, Ink, TextAnchor.UpperLeft, false);
@@ -564,6 +610,7 @@ public partial class MagicGame : MonoBehaviour
         if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(0, 0, 40, 44));
         foreach (var t in robotTabs)
         {
+            if (t.unit == null || !t.bg.gameObject.activeSelf) continue;
             bool sel = t.unit == editing;
             t.bg.color = sel ? Pink : new Color(1, 1, 1, 0.85f);
             t.text.color = sel ? Color.white : Ink;
@@ -581,7 +628,7 @@ public partial class MagicGame : MonoBehaviour
             if (ch.GetComponent<BlockView>() != null) Destroy(ch.gameObject);
         }
         var finish = codeList.Find("Finish");
-        foreach (var b in code) MakeBlock(codeList, b, false);
+        BuildCodeRows(code);
         if (finish != null) finish.SetAsLastSibling();
 
         int used = Compiler.MemoryUsed(code, cap);
@@ -1560,7 +1607,7 @@ public partial class MagicGame : MonoBehaviour
             : new[] { new Vector2(0.64f, 0.3f), new Vector2(0.76f, 0.25f), new Vector2(0.89f, 0.31f) };
         // 奥のキャラから順に置く（手前のキャラが上に重なるように）
         var order = new List<(Unit u, Vector2 pos, float scale)>();
-        for (int i = 0; i < 3; i++) order.Add((battle.Allies[i], allyPos[i], AllyScale));
+        for (int i = 0; i < battle.Allies.Count && i < allyPos.Length; i++) order.Add((battle.Allies[i], allyPos[i], AllyScale));
         for (int i = 0; i < battle.Enemies.Count && i < enemyPos.Length; i++)
             order.Add((battle.Enemies[i], enemyPos[i], battle.Enemies[i].Art == "rootkit" ? 9f : battle.Enemies[i].Art == "troy" ? 7.5f : 6f));
         order.Sort((a, b) => b.pos.y.CompareTo(a.pos.y));
@@ -1835,6 +1882,7 @@ public partial class MagicGame : MonoBehaviour
             b.targetGraphic = tab;
             b.onClick.AddListener(() =>
             {
+                if (idx >= battle.Allies.Count) return;
                 var u = battle.Allies[idx];
                 if (!u.Alive) return;
                 if (u.LinkedTo != null) { programMessage.text = u.Name + "は" + u.LinkedTo.Name + "とリンク中です"; return; }
@@ -1973,9 +2021,55 @@ public partial class MagicGame : MonoBehaviour
         AddOutline(t, new Color(0.55f, 0.35f, 0f, 0.8f), 2f);
     }
 
-    void MakeBlock(RectTransform parent, Block data, bool fromPalette)
+    const float Indent = 36f;   // 「もし」「繰り返す」の中のブロックのずれ
+
+    static Color BlockColor(BlockKind k) =>
+        k == BlockKind.If || k == BlockKind.Else || k == BlockKind.EndIf ? UiKit.Hex("ffab19")
+        : k == BlockKind.Repeat || k == BlockKind.EndRepeat ? UiKit.Hex("f0801e")
+        : BlockColors[(int)k];
+
+    // コードを 1 行ずつ並べる。中のブロックは右にずらし、左に制御ブロックの色の帯を引く
+    void BuildCodeRows(List<Block> code)
     {
-        var col = BlockColors[(int)data.Kind];
+        var open = new List<Color>();   // いま中にいる制御ブロックの色
+        foreach (var b in code)
+        {
+            bool arm = b.Kind == BlockKind.Else || b.Kind == BlockKind.EndIf || b.Kind == BlockKind.EndRepeat;
+            int depth = arm ? open.Count - 1 : open.Count;
+            float h = b.Kind == BlockKind.EndIf || b.Kind == BlockKind.EndRepeat ? 34f : b.Kind == BlockKind.Else ? 46f : 66f;
+            var row = NewRect(codeList, "Row");
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = h;
+            for (int d = 0; d < depth && d < open.Count; d++)   // 外側の C の字の左の帯
+            {
+                var bar = Img(row, null, open[d]).rectTransform;
+                Anchor(bar, 0, 0, 0, 1, d * Indent, -2, d * Indent + 16, 6);
+            }
+            if (arm)
+            {
+                var col = open.Count > 0 ? open[open.Count - 1] : BlockColor(b.Kind);
+                var shape = Img(row, UiKit.BlockShape(), col);
+                shape.type = Image.Type.Sliced;
+                Anchor(shape.rectTransform, 0, 0, 0, 1, depth * Indent, 0, depth * Indent + 260, 0);
+                var view = shape.gameObject.AddComponent<BlockView>();
+                view.Init(this, b, false, canvas);
+                view.Draggable = false;
+                if (b.Kind == BlockKind.Else)
+                {
+                    var t = MakeText(shape.rectTransform, "でなければ", 24, Color.white, TextAnchor.MiddleLeft, true);
+                    Anchor(t.rectTransform, 0, 0, 1, 1, 20, UiKit.BlockTabHeight, 0, 0);
+                }
+                if (b.Kind != BlockKind.Else) open.RemoveAt(open.Count - 1);
+                continue;
+            }
+            var bv = MakeBlock(row, b, false);
+            Anchor((RectTransform)bv.transform, 0, 0, 1, 1, depth * Indent, 0, 0, 0);
+            if (b.Kind == BlockKind.If || b.Kind == BlockKind.Repeat) open.Add(BlockColor(b.Kind));
+        }
+    }
+
+    BlockView MakeBlock(RectTransform parent, Block data, bool fromPalette)
+    {
+        var col = BlockColor(data.Kind);
         var img = Img(parent, UiKit.BlockShape(), col);
         img.type = Image.Type.Sliced;
         var rect = img.rectTransform;
@@ -1991,11 +2085,20 @@ public partial class MagicGame : MonoBehaviour
         var b = pill.gameObject.AddComponent<Button>();
         b.targetGraphic = pill;
         b.onClick.AddListener(() => OnBlockValueClicked(view));
-        var valueText = MakeText(pill.rectTransform, "", 28, Color.white, TextAnchor.MiddleCenter, true);
+        bool isIf = data.Kind == BlockKind.If;
+        float left = isIf ? 70f : 16f, width = isIf ? 290f : 134f;   // 「もし」は条件が長いので広く
+        Anchor(pill.rectTransform, 0, 0, 0, 1, left, UiKit.BlockTabHeight + 8, left + width, -8);
+        var valueText = MakeText(pill.rectTransform, "", isIf ? 22 : 28, Color.white, TextAnchor.MiddleCenter, true);
         Anchor(valueText.rectTransform, 0, 0, 1, 1, 6, 0, -6, 0);
+        if (isIf)
+        {
+            var moshi = MakeText(rect, "もし", 24, Color.white, TextAnchor.MiddleLeft, true);
+            Anchor(moshi.rectTransform, 0, 0, 1, 1, 16, UiKit.BlockTabHeight, 0, 0);
+        }
         var suffix = MakeText(rect, "", 24, Color.white, TextAnchor.MiddleLeft, true);
-        Anchor(suffix.rectTransform, 0, 0, 1, 1, 160, UiKit.BlockTabHeight, 0, 0);
+        Anchor(suffix.rectTransform, 0, 0, 1, 1, left + width + 10, UiKit.BlockTabHeight, 0, 0);
         view.SetLabels(valueText, suffix);
+        return view;
     }
 
     // ================= 部品 =================
@@ -2113,6 +2216,7 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
 {
     public Block Data { get; private set; }
     public bool FromPalette { get; private set; }
+    public bool Draggable = true;   // 「でなければ」「おわり」は単独では動かせない
     MagicGame game;
     Canvas canvas;
     RectTransform ghost;
@@ -2145,6 +2249,7 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
 
     public void OnBeginDrag(PointerEventData e)
     {
+        if (!Draggable) return;
         var rt = (RectTransform)transform;
         var copy = Instantiate(gameObject, canvas.transform);
         Destroy(copy.GetComponent<BlockView>());
@@ -2173,6 +2278,7 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
 
     public void OnEndDrag(PointerEventData e)
     {
+        if (!Draggable) return;
         if (ghost != null) Destroy(ghost.gameObject);
         ghost = null;
         var mine = GetComponent<CanvasGroup>();

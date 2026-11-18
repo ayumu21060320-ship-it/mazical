@@ -9,7 +9,9 @@ namespace MagicBattle
 {
     // ブロックの種類。この順番で並べないと送信できない（追加効果は無くてもよい）
     // MagicLink（マジカルリンク）はリンクプログラムだけで使える、最後に置くブロック
-    public enum BlockKind { Element, Target, Power, Shots, Effect, MagicLink }
+    // If・Else・EndIf・Repeat・EndRepeat は Scratch と同じ「C の字」の制御ブロック（装備したキャラだけ使える）
+    //   もし ＜条件＞ なら … でなければ … おわり ／ ○回繰り返す … おわり
+    public enum BlockKind { Element, Target, Power, Shots, Effect, MagicLink, If, Else, EndIf, Repeat, EndRepeat }
 
     public enum Element { Fire, Ice, None }
     public enum TargetType { One, All }
@@ -45,10 +47,22 @@ namespace MagicBattle
         public const int NormalPowerCount = 5;
         public static readonly int[] ShotValues = { 1, 2, 3 };
 
+        // 「もし」の条件
+        public static readonly string[] Conditions =
+        {
+            "敵の弱点が 炎", "敵の弱点が 氷", "敵の弱点が 無", "敵が 2体以上", "自分の HP が半分以下",
+        };
+        public static readonly int[] RepeatValues = { 2, 3, 4 };
+
+        public static bool IsControl(BlockKind k) => k >= BlockKind.If;
+
         public static int OptionCount(BlockKind k, bool link = false)
         {
             switch (k)
             {
+                case BlockKind.If: return Conditions.Length;
+                case BlockKind.Repeat: return RepeatValues.Length;
+                case BlockKind.Else: case BlockKind.EndIf: case BlockKind.EndRepeat: return 1;
                 case BlockKind.Element: return 3;
                 case BlockKind.Target: return 2;
                 case BlockKind.Power: return link ? PowerValues.Length : NormalPowerCount;
@@ -68,6 +82,10 @@ namespace MagicBattle
                 case BlockKind.Power: return PowerValues[v].ToString();
                 case BlockKind.Shots: return ShotValues[v].ToString();
                 case BlockKind.MagicLink: return "マジカルリンク";
+                case BlockKind.If: return Conditions[v];
+                case BlockKind.Repeat: return RepeatValues[v].ToString();
+                case BlockKind.Else: return "でなければ";
+                case BlockKind.EndIf: case BlockKind.EndRepeat: return "";
                 default: return new[] { "爆破", "回復", "スロー" }[v];
             }
         }
@@ -82,6 +100,8 @@ namespace MagicBattle
                 case BlockKind.Power: return "の威力";
                 case BlockKind.Shots: return "回打つ";
                 case BlockKind.MagicLink: return "でコンビ魔法";
+                case BlockKind.If: return "なら";
+                case BlockKind.Repeat: return "回繰り返す";
                 default: return "を得る";
             }
         }
@@ -95,6 +115,8 @@ namespace MagicBattle
                 case BlockKind.Power: return "威力";
                 case BlockKind.Shots: return "発射方法";
                 case BlockKind.MagicLink: return "マジカルリンク";
+                case BlockKind.If: case BlockKind.Else: case BlockKind.EndIf: return "もし";
+                case BlockKind.Repeat: case BlockKind.EndRepeat: return "繰り返す";
                 default: return "追加効果";
             }
         }
@@ -105,6 +127,9 @@ namespace MagicBattle
             switch (k)
             {
                 case BlockKind.MagicLink: return 0;
+                case BlockKind.If: return 80;
+                case BlockKind.Repeat: return 60;
+                case BlockKind.Else: case BlockKind.EndIf: case BlockKind.EndRepeat: return 0;
                 case BlockKind.Element: return v == 2 ? 50 : 100;
                 case BlockKind.Target: return v == 0 ? 100 : 300;
                 case BlockKind.Power: return PowerValues[v] * 3;
@@ -123,6 +148,9 @@ namespace MagicBattle
         public float LinkBonus = 1f;  // マジカルリンクの威力の倍率
         public bool IsLink;
         public Unit Partner;          // リンクの相手
+        public List<Block> Code;      // 送信したコード（もし・繰り返すを打つ瞬間に決めるため）
+        public int Capacity;
+        public bool HasControl;
         public TargetType Target;
         public int Power;
         public int Shots;
@@ -165,8 +193,122 @@ namespace MagicBattle
         // マジカルリンクの威力の倍率：残りのメモリ 2000 ごとに +1（最大 2 倍）
         public static float LinkBonusFor(int memory) => Math.Min(2f, 1f + memory / 2000f);
 
+        // ---- 制御ブロック（もし・繰り返す） ----
+
+        // 「もし」「繰り返す」の形が正しいか（おわりの数・でなければの場所）
+        static bool StructureOk(List<Block> code, out string message)
+        {
+            var stack = new Stack<(BlockKind kind, bool hadElse)>();
+            foreach (var b in code)
+            {
+                switch (b.Kind)
+                {
+                    case BlockKind.If: case BlockKind.Repeat: stack.Push((b.Kind, false)); break;
+                    case BlockKind.Else:
+                        if (stack.Count == 0 || stack.Peek().kind != BlockKind.If || stack.Peek().hadElse) { message = "「でなければ」の場所がおかしいです"; return false; }
+                        stack.Push((stack.Pop().kind, true));
+                        break;
+                    case BlockKind.EndIf:
+                        if (stack.Count == 0 || stack.Peek().kind != BlockKind.If) { message = "「もし」のおわりの場所がおかしいです"; return false; }
+                        stack.Pop();
+                        break;
+                    case BlockKind.EndRepeat:
+                        if (stack.Count == 0 || stack.Peek().kind != BlockKind.Repeat) { message = "「繰り返す」のおわりの場所がおかしいです"; return false; }
+                        stack.Pop();
+                        break;
+                }
+            }
+            if (stack.Count > 0) { message = "「もし」か「繰り返す」におわりがありません"; return false; }
+            message = "";
+            return true;
+        }
+
+        // 条件の答え（ifTrue[何番目のもし]）にしたがって、実際に使うブロックだけを並べる。繰り返しの回数のかけ算も返す
+        public static List<Block> Flatten(List<Block> code, Func<int, bool> ifTrue, out int repeat)
+        {
+            var plain = new List<Block>();
+            var active = new Stack<bool>();
+            var repeats = new Stack<int>();
+            var ifResults = new Stack<bool>();
+            bool on = true;
+            int ifIndex = 0;
+            repeat = 1;
+            int mul = 1;
+            foreach (var b in code)
+            {
+                switch (b.Kind)
+                {
+                    case BlockKind.If:
+                        bool r = ifTrue(ifIndex++);
+                        active.Push(on);
+                        ifResults.Push(r);
+                        on = on && r;
+                        break;
+                    case BlockKind.Else:
+                        on = active.Peek() && !ifResults.Peek();
+                        break;
+                    case BlockKind.EndIf:
+                        on = active.Pop();
+                        ifResults.Pop();
+                        break;
+                    case BlockKind.Repeat:
+                        active.Push(on);
+                        repeats.Push(mul);
+                        if (on) mul *= Blocks.RepeatValues[b.Value];
+                        break;
+                    case BlockKind.EndRepeat:
+                        on = active.Pop();
+                        mul = repeats.Pop();
+                        break;
+                    default:
+                        if (on)
+                        {
+                            plain.Add(b);
+                            if (b.Kind == BlockKind.Shots) repeat = Math.Max(repeat, mul);   // 発射方法が繰り返しの中なら、その回数だけ打つ
+                        }
+                        break;
+                }
+            }
+            return plain;
+        }
+
+        static int IfCount(List<Block> code)
+        {
+            int n = 0;
+            foreach (var b in code) if (b.Kind == BlockKind.If) n++;
+            return n;
+        }
+
         // 送信できるか確かめる。できないときは理由を message に入れて false。link = リンクプログラム
+        // 「もし」があるときは、条件の答えのどの組み合わせでも魔法になるかを確かめる
         public static bool Check(List<Block> code, int capacity, out string message, bool link = false)
+        {
+            if (code.Count == 0) { message = "ブロックが1つもありません"; return false; }
+            if (!StructureOk(code, out message)) return false;
+            int n = Math.Min(IfCount(code), 6);
+            for (int mask = 0; mask < (1 << n); mask++)
+            {
+                int m = mask;
+                var plain = Flatten(code, k => k < n && ((m >> k) & 1) == 1, out _);
+                if (!CheckPlain(plain, out message, link))
+                {
+                    if (n > 0) message = "（もしの条件によっては）" + message;
+                    return false;
+                }
+            }
+            int used = BaseMemory(code);
+            if (used > capacity) { message = "メモリオーバー（" + used + " / " + capacity + "）"; return false; }
+            if (code.Exists(b => b.Kind == BlockKind.MagicLink) && capacity - used < 100)
+            {
+                message = "マジカルリンクに使うメモリが足りません（残り100以上いる）";
+                return false;
+            }
+            message = "送信できます";
+            return true;
+        }
+
+        // 制御ブロックの無い、ふつうの並び 1 本を確かめる
+        static bool CheckPlain(List<Block> code, out string message, bool link)
         {
             if (code.Count == 0) { message = "ブロックが1つもありません"; return false; }
             int elements = 0;
@@ -194,23 +336,36 @@ namespace MagicBattle
             {
                 if (!code.Exists(b => b.Kind == k)) { message = Blocks.KindName(k) + "のブロックがありません"; return false; }
             }
-            int used = BaseMemory(code);
-            if (used > capacity) { message = "メモリオーバー（" + used + " / " + capacity + "）"; return false; }
-            if (code.Exists(b => b.Kind == BlockKind.MagicLink) && capacity - used < 100)
-            {
-                message = "マジカルリンクに使うメモリが足りません（残り100以上いる）";
-                return false;
-            }
-            message = "送信できます";
+            message = "";
             return true;
         }
 
-        // Check が通った code から魔法を作る
-        public static Spell Build(List<Block> code, int capacity)
+        // 条件を決める材料（だれが・だれに打つか）
+        public static bool Evaluate(int condition, Unit caster, Unit target, int enemyCount)
         {
-            var s = new Spell { Memory = MemoryUsed(code, capacity) };
+            switch (condition)
+            {
+                case 0: return target != null && Array.IndexOf(target.Weak, Element.Fire) >= 0;
+                case 1: return target != null && Array.IndexOf(target.Weak, Element.Ice) >= 0;
+                case 2: return target != null && Array.IndexOf(target.Weak, Element.None) >= 0;
+                case 3: return enemyCount >= 2;
+                case 4: return caster != null && caster.Hp * 2 <= caster.MaxHp;
+                default: return false;
+            }
+        }
+
+        // Check が通った code から魔法を作る。条件は caster・target・enemyCount で決める（null なら全部「はい」）
+        public static Spell Build(List<Block> code, int capacity, Unit caster = null, Unit target = null, int enemyCount = 0)
+        {
+            var ifs = new List<int>();
+            foreach (var b in code) if (b.Kind == BlockKind.If) ifs.Add(b.Value);
+            bool ctx = caster != null;
+            var plain = Flatten(code, k => !ctx || (k < ifs.Count && Evaluate(ifs[k], caster, target, enemyCount)), out int repeat);
+            var s = new Spell { Memory = MemoryUsed(code, capacity), Code = new List<Block>(), Capacity = capacity };
+            foreach (var b in code) s.Code.Add(b.Clone());
+            s.HasControl = code.Exists(b => Blocks.IsControl(b.Kind));
             bool firstElement = true;
-            foreach (var b in code)
+            foreach (var b in plain)
             {
                 switch (b.Kind)
                 {
@@ -220,12 +375,23 @@ namespace MagicBattle
                         break;
                     case BlockKind.Target: s.Target = (TargetType)b.Value; break;
                     case BlockKind.Power: s.Power = Blocks.PowerValues[b.Value]; break;
-                    case BlockKind.Shots: s.Shots = Blocks.ShotValues[b.Value]; break;
+                    case BlockKind.Shots: s.Shots = Blocks.ShotValues[b.Value] * repeat; break;
                     case BlockKind.Effect: s.HasEffect = true; s.Effect = (Effect)b.Value; break;
                     case BlockKind.MagicLink: s.LinkBonus = LinkBonusFor(MagicLinkMemory(code, capacity)); break;
                 }
             }
             return s;
+        }
+
+        // 打つ瞬間に、条件を見て魔法を決め直す（もしが無ければそのまま）
+        public static Spell Resolve(Spell s, Unit caster, Unit target, int enemyCount)
+        {
+            if (!s.HasControl) return s;
+            var r = Build(s.Code, s.Capacity, caster, target, enemyCount);
+            r.IsLink = s.IsLink;
+            r.Partner = s.Partner;
+            r.Memory = s.Memory;
+            return r;
         }
 
         // メモリを使うほど遅くなる。タイムラインを 1 秒に進む量
@@ -264,6 +430,8 @@ namespace MagicBattle
         public Unit LinkedTo;     // リンクの相手に選ばれた（このターンは魔法を打たない）
 
         public int Level = 1;
+        public HashSet<string> Mods = new HashSet<string>();   // 装備しているもの（Modules の Id）
+        public bool HasMod(string id) => Mods.Contains(id);
         public bool LockPending;  // ロックされた（次のターンにメモリ容量が減る）
         public bool Locked;       // このターンはメモリ容量が減っている
 
@@ -325,6 +493,33 @@ namespace MagicBattle
         public Unit Actor;
         public readonly List<Hit> Hits = new List<Hit>();
         public string Text;
+    }
+
+    // 装備（チーム編成の「装備」画面でキャラごとにはめる）
+    //   追加ブロック：そのキャラのプログラム画面の手持ちブロックに出てくる
+    //   強化チップ：  そのキャラの能力が上がる
+    public class Module
+    {
+        public string Id, Name, Description;
+        public bool IsBlock;
+    }
+
+    public static class Modules
+    {
+        public const string If = "if", Repeat = "repeat", Memory = "mem", Clock = "clock", Guard = "guard";
+        public static readonly Module[] All =
+        {
+            new Module { Id = If, Name = "もし〜なら", IsBlock = true, Description = "追加ブロック。条件で属性や中身を切りかえる（でなければ つき）" },
+            new Module { Id = Repeat, Name = "〜回繰り返す", IsBlock = true, Description = "追加ブロック。中のブロックを決めた回数だけくり返す。メモリは1回分" },
+            new Module { Id = Memory, Name = "メモリ圧縮チップ", Description = "強化チップ。メモリ容量 +200" },
+            new Module { Id = Clock, Name = "クロックアップ", Description = "強化チップ。処理速度（タイムラインを進む速さ）+15%" },
+            new Module { Id = Guard, Name = "防御プログラム", Description = "強化チップ。ウイルスから受けるダメージ -20%" },
+        };
+
+        public static Module Find(string id) => Array.Find(All, m => m.Id == id);
+
+        // 装備の枠の数：Lv1〜2 は 2、Lv3〜4 は 3、Lv5 から 4
+        public static int Slots(int level) => level >= 5 ? 4 : level >= 3 ? 3 : 2;
     }
 
     // AI ロボット（味方）の情報。キャラクター画面と戦闘で使う
@@ -493,17 +688,24 @@ namespace MagicBattle
         public Battle(int seed, Request request) : this(seed, request, null, 0) { }
 
         // levels：キャラ（Art）ごとのレベル。memoryBonus：メモリ増設チップで増えたメモリ容量
-        public Battle(int seed, Request request, Dictionary<string, int> levels, int memoryBonus)
+        // loadouts：キャラごとの装備。party：出撃するキャラ（Art）。null なら最初の 3 人
+        public Battle(int seed, Request request, Dictionary<string, int> levels, int memoryBonus,
+                      Dictionary<string, string[]> loadouts = null, List<string> party = null)
         {
             rng = new Random(seed);
             waves = request.Waves ?? new[] { request.Enemies };
             WaveCount = waves.Length;
             foreach (var c in Characters.All)
             {
+                if (party != null && !party.Contains(c.Art)) continue;
+                if (party == null && Allies.Count >= 3) break;
                 int lv = levels != null && levels.TryGetValue(c.Art, out var l) ? l : 1;
                 var a = Ally(c.Name, c.Short, c.Art, c.Trait, c.Capacity + (lv - 1) * Levels.MemoryPerLevel + memoryBonus);
                 a.MaxHp = a.Hp = c.Hp + (lv - 1) * Levels.HpPerLevel;
                 a.Level = lv;
+                if (loadouts != null && loadouts.TryGetValue(c.Art, out var mods))
+                    foreach (var id in mods) if (!string.IsNullOrEmpty(id)) a.Mods.Add(id);
+                if (a.HasMod(Modules.Memory)) a.Capacity += 200;
                 Allies.Add(a);
             }
             // 敵は依頼主のパソコンに入りこんだウイルス
@@ -563,9 +765,9 @@ namespace MagicBattle
         void UpdateSpeed(Unit ally)
         {
             var s = ally.Spell;
-            if (s == null) { ally.Speed = NoProgramSpeed; return; }
+            if (s == null) { ally.Speed = NoProgramSpeed * (ally.HasMod(Modules.Clock) ? 1.15f : 1f); return; }
             int cap = s.IsLink && ally.LinkPartner != null ? LinkCapacity(ally, ally.LinkPartner) : CapacityOf(ally);
-            ally.Speed = Compiler.Speed(s.Memory, cap);
+            ally.Speed = Compiler.Speed(s.Memory, cap) * (ally.HasMod(Modules.Clock) ? 1.15f : 1f);
         }
 
         // チャージする／やめる。リンク中はできない
@@ -733,7 +935,7 @@ namespace MagicBattle
 
         void AllyAct(Unit a, ActionResult r)
         {
-            var s = a.Spell;
+            var s = a.Spell == null ? null : Compiler.Resolve(a.Spell, a, CurrentTarget(), Enemies.FindAll(x => x.Alive).Count);
             if (a.LinkedTo != null) { r.Text = a.Name + "：" + a.LinkedTo.Name + "とリンク中（メモリを貸している）"; return; }
             if (a.Charging) { r.Text = a.Name + "：チャージ中… 次のターンにパワーアップ！"; return; }
             if (s == null) { r.Text = a.Name + "：プログラムが無いので何もしない"; return; }
@@ -764,6 +966,9 @@ namespace MagicBattle
             }
         }
 
+        // 防御プログラムを付けていれば、受けるダメージ -20%
+        static int Taken(Unit ally, int d) => ally.HasMod(Modules.Guard) ? Math.Max(1, (int)Math.Round(d * 0.8f)) : d;
+
         void EnemyAct(Unit e, ActionResult r)
         {
             var alive = Allies.FindAll(x => x.Alive);
@@ -773,7 +978,7 @@ namespace MagicBattle
                 int total = 0;
                 foreach (var a in alive)
                 {
-                    int dd = (int)(e.Attack * 0.6f) + rng.Next(0, 8);
+                    int dd = Taken(a, (int)(e.Attack * 0.6f) + rng.Next(0, 8));
                     a.Hp = Math.Max(0, a.Hp - dd);
                     total += dd;
                     r.Hits.Add(new Hit { Target = a, Amount = dd });
@@ -782,7 +987,7 @@ namespace MagicBattle
                 return;
             }
             var t = alive[rng.Next(alive.Count)];
-            int d = e.Attack + rng.Next(0, 11);
+            int d = Taken(t, e.Attack + rng.Next(0, 11));
             t.Hp = Math.Max(0, t.Hp - d);
             r.Hits.Add(new Hit { Target = t, Amount = d });
             r.Text = e.Name + "の侵食！ " + t.Name + "に" + d + "ダメージ";

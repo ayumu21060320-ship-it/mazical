@@ -14,6 +14,7 @@ Unity プロジェクトは `My project/` フォルダ。Git に入れるのは�
 - `My project/Assets/Scripts/ArtData.cs` … キャラクター・ウイルスのドット絵（PNG を文字にしたもの）
 - `My project/Assets/Scripts/UiKit.cs` … 画面の部品の形（角の丸い四角・斜めの帯・ブロック・魔法陣など）をコードで作る
 - `My project/Assets/Scripts/MagicGame.Home.cs` … ホーム・キャラクター・ブロック図鑑・遊び方・ハッキングの画面
+- `My project/Assets/Scripts/MagicGame.Team.cs` … チーム編成と装備
 - `My project/Assets/Scripts/MagicGame.Progress.cs` … 経験値・レベル・メールボックス・依頼完了の通信
 - `My project/Assets/Scripts/MagicGame.Intro.cs` … オープニング（3D のパソコン → デスクトップ）
 - `My project/Assets/Scripts/MagicGame.cs` … タイトル・戦闘・プログラムの画面と操作。シーンを再生すると自動で起動する（シーンに置く必要なし）

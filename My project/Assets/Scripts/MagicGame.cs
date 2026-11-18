@@ -304,7 +304,7 @@ public partial class MagicGame : MonoBehaviour
         foreach (var kv in icons)
         {
             var u = kv.Key;
-            kv.Value.gameObject.SetActive(views.TryGetValue(u, out var v) ? !v.Dead : u.Alive);
+            kv.Value.gameObject.SetActive((views.TryGetValue(u, out var v) ? !v.Dead : u.Alive) && !u.Charging);   // チャージ中は出さない
             float t = Mathf.Clamp01(u.Gauge / Battle.GaugeLength);
             var p = kv.Value.anchoredPosition;
             p.x = t * w;

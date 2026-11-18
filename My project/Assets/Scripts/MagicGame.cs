@@ -588,8 +588,9 @@ public partial class MagicGame : MonoBehaviour
         ClearChildren(paletteList);
         foreach (var k in linkMode ? Blocks.LinkOrder : Blocks.Order) MakeBlock(paletteList, new Block(k), true);
         // 装備した追加ブロック（リンクのときは2人分）
-        bool hasIf = editing.HasMod(Modules.If) || (linkMode && linkPartner.HasMod(Modules.If));
-        bool hasRepeat = editing.HasMod(Modules.Repeat) || (linkMode && linkPartner.HasMod(Modules.Repeat));
+        // （起動したときはまだだれも選んでいないので、editing が無いこともある）
+        bool hasIf = editing != null && (editing.HasMod(Modules.If) || (linkMode && linkPartner != null && linkPartner.HasMod(Modules.If)));
+        bool hasRepeat = editing != null && (editing.HasMod(Modules.Repeat) || (linkMode && linkPartner != null && linkPartner.HasMod(Modules.Repeat)));
         if (hasIf) MakeBlock(paletteList, new Block(BlockKind.If), true);
         if (hasRepeat) MakeBlock(paletteList, new Block(BlockKind.Repeat), true);
         paletteHint = MakeText(paletteList, linkMode

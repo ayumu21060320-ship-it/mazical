@@ -288,7 +288,7 @@ namespace MagicBattle
     }
 
     // AI ロボット（味方）の情報。キャラクター画面と戦闘で使う
-    public class CharacterInfo
+    public class RobotInfo
     {
         public string Name, Short, Art, Description;
         public Trait Trait;
@@ -297,13 +297,13 @@ namespace MagicBattle
 
     public static class Characters
     {
-        public static readonly CharacterInfo[] All =
+        public static readonly RobotInfo[] All =
         {
-            new CharacterInfo { Name = "レッド", Short = "レ", Art = "red", Trait = Trait.FireUp, Capacity = 1000, Hp = 300,
+            new RobotInfo { Name = "レッド", Short = "レ", Art = "red", Trait = Trait.FireUp, Capacity = 1000, Hp = 300,
                 Description = "元気いっぱいの炎の魔法使い。炎属性の魔法の威力が 1.5 倍" },
-            new CharacterInfo { Name = "ブルー", Short = "ブ", Art = "blue", Trait = Trait.IceUp, Capacity = 1000, Hp = 300,
+            new RobotInfo { Name = "ブルー", Short = "ブ", Art = "blue", Trait = Trait.IceUp, Capacity = 1000, Hp = 300,
                 Description = "冷静な氷の魔法使い。氷属性の魔法の威力が 1.5 倍" },
-            new CharacterInfo { Name = "イエロー", Short = "イ", Art = "yellow", Trait = Trait.MemoryUp, Capacity = 1500, Hp = 300,
+            new RobotInfo { Name = "イエロー", Short = "イ", Art = "yellow", Trait = Trait.MemoryUp, Capacity = 1500, Hp = 300,
                 Description = "強気な天才。メモリ容量が大きく、長いプログラムを組める" },
         };
     }

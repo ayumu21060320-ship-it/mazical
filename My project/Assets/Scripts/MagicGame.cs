@@ -626,7 +626,9 @@ public partial class MagicGame : MonoBehaviour
         for (int i = codeList.childCount - 1; i >= 0; i--)
         {
             var ch = codeList.GetChild(i);
-            if (ch.GetComponent<BlockView>() != null) Destroy(ch.gameObject);
+            if (ch.name == "Start" || ch.name == "Finish") continue;
+            ch.SetParent(null, false);   // すぐに外す（Destroy はフレームの終わりなので、残ったまま数えないように）
+            Destroy(ch.gameObject);
         }
         var finish = codeList.Find("Finish");
         BuildCodeRows(code);
@@ -2087,9 +2089,9 @@ public partial class MagicGame : MonoBehaviour
         b.targetGraphic = pill;
         b.onClick.AddListener(() => OnBlockValueClicked(view));
         bool isIf = data.Kind == BlockKind.If;
-        float left = isIf ? 70f : 16f, width = isIf ? 290f : 134f;   // 「もし」は条件が長いので広く
+        float left = isIf ? 66f : 16f, width = isIf ? 220f : 134f;   // 「もし」は条件が長いので広く
         Anchor(pill.rectTransform, 0, 0, 0, 1, left, UiKit.BlockTabHeight + 8, left + width, -8);
-        var valueText = MakeText(pill.rectTransform, "", isIf ? 22 : 28, Color.white, TextAnchor.MiddleCenter, true);
+        var valueText = MakeText(pill.rectTransform, "", isIf ? 20 : 28, Color.white, TextAnchor.MiddleCenter, true);
         Anchor(valueText.rectTransform, 0, 0, 1, 1, 6, 0, -6, 0);
         if (isIf)
         {
@@ -2098,6 +2100,7 @@ public partial class MagicGame : MonoBehaviour
         }
         var suffix = MakeText(rect, "", 24, Color.white, TextAnchor.MiddleLeft, true);
         Anchor(suffix.rectTransform, 0, 0, 1, 1, left + width + 10, UiKit.BlockTabHeight, 0, 0);
+        suffix.horizontalOverflow = HorizontalWrapMode.Overflow;   // 折り返さない（「なら」が縦にならないように）
         view.SetLabels(valueText, suffix);
         return view;
     }

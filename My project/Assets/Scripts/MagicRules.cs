@@ -301,11 +301,7 @@ namespace MagicBattle
             }
             int used = BaseMemory(code);
             if (used > capacity) { message = "メモリオーバー（" + used + " / " + capacity + "）"; return false; }
-            if (code.Exists(b => b.Kind == BlockKind.MagicLink) && capacity - used < 100)
-            {
-                message = "マジカルリンクに使うメモリが足りません（残り100以上いる）";
-                return false;
-            }
+            // マジカルリンクは残りのメモリを全部使う（残りが少なければ、威力の上がり方が小さいだけ）
             message = "送信できます";
             return true;
         }

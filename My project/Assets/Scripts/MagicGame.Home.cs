@@ -263,7 +263,7 @@ public partial class MagicGame
 
     IEnumerator Bob(RectTransform rt, int i)
     {
-        while (true)
+        while (rt != null)
         {
             rt.anchoredPosition = new Vector2(0, Mathf.Sin(Time.time * 2f + i) * 8f);
             yield return null;

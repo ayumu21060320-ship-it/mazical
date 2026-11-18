@@ -190,6 +190,7 @@ namespace MagicBattle
     {
         public string Name;
         public string Short;      // タイムラインのアイコンの 1 文字
+        public string Art;        // ドット絵の名前（PixelArt.Sprites）
         public bool IsAlly;
         public int MaxHp, Hp;
         public float Gauge;       // タイムライン上の位置。Battle.GaugeLength で行動する
@@ -247,22 +248,23 @@ namespace MagicBattle
         public Battle(int seed)
         {
             rng = new Random(seed);
-            Allies.Add(Ally("レッド", "レ", Trait.FireUp, 1000));
-            Allies.Add(Ally("ブルー", "ブ", Trait.IceUp, 1000));
-            Allies.Add(Ally("イエロー", "イ", Trait.MemoryUp, 1500));
-            Enemies.Add(Enemy("ゴブリンA", "A", 400, 35, 30f, true, Element.Fire));
-            Enemies.Add(Enemy("ゴブリンB", "B", 400, 35, 32f, true, Element.Ice));
-            Enemies.Add(Enemy("オーガ", "オ", 700, 60, 22f, false, Element.None));
+            Allies.Add(Ally("レッド", "レ", "red", Trait.FireUp, 1000));
+            Allies.Add(Ally("ブルー", "ブ", "blue", Trait.IceUp, 1000));
+            Allies.Add(Ally("イエロー", "イ", "yellow", Trait.MemoryUp, 1500));
+            // 敵はパソコンに入りこんだウイルス
+            Enemies.Add(Enemy("バグ", "バ", "bug", 400, 35, 30f, true, Element.Fire));
+            Enemies.Add(Enemy("ワーム", "ワ", "worm", 400, 35, 32f, true, Element.Ice));
+            Enemies.Add(Enemy("トロイ", "ト", "troy", 700, 60, 22f, false, Element.None));
         }
 
-        static Unit Ally(string name, string sh, Trait t, int cap) => new Unit
+        static Unit Ally(string name, string sh, string art, Trait t, int cap) => new Unit
         {
-            Name = name, Short = sh, IsAlly = true, MaxHp = 300, Hp = 300, Trait = t, Capacity = cap, Speed = NoProgramSpeed,
+            Name = name, Short = sh, Art = art, IsAlly = true, MaxHp = 300, Hp = 300, Trait = t, Capacity = cap, Speed = NoProgramSpeed,
         };
 
-        static Unit Enemy(string name, string sh, int hp, int atk, float speed, bool weak, Element w) => new Unit
+        static Unit Enemy(string name, string sh, string art, int hp, int atk, float speed, bool weak, Element w) => new Unit
         {
-            Name = name, Short = sh, IsAlly = false, MaxHp = hp, Hp = hp, Attack = atk, Speed = speed,
+            Name = name, Short = sh, Art = art, IsAlly = false, MaxHp = hp, Hp = hp, Attack = atk, Speed = speed,
             HasWeakness = weak, Weakness = w,
         };
 
@@ -358,7 +360,7 @@ namespace MagicBattle
                     if (s.HasEffect && s.Effect == Effect.Slow) e.Gauge = Math.Max(0f, e.Gauge - 30f);
                 }
             }
-            r.Text = a.Name + "の魔法（" + s.Describe() + "）！ 合計" + total + "ダメージ";
+            r.Text = a.Name + "：コンパイル完了！ 魔法（" + s.Describe() + "）発動！ 合計" + total + "ダメージ";
             if (s.HasEffect && s.Effect == Effect.Heal)
             {
                 int h = Math.Min(a.MaxHp - a.Hp, s.Power / 2);
@@ -376,7 +378,7 @@ namespace MagicBattle
             int d = e.Attack + rng.Next(0, 11);
             t.Hp = Math.Max(0, t.Hp - d);
             r.Hits.Add(new Hit { Target = t, Amount = d });
-            r.Text = e.Name + "の攻撃！ " + t.Name + "に" + d + "ダメージ";
+            r.Text = e.Name + "の侵食！ " + t.Name + "に" + d + "ダメージ";
         }
     }
 }

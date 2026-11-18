@@ -3,7 +3,8 @@
 //                   敵をクリックすると「1体」の魔法でねらう敵を選べる
 //   プログラム画面: 左の手持ちブロックをドラッグして中央のコードに置く。コードの外へドラッグすると消える
 //                   ブロックの白い枠をクリックすると中身（炎・氷…、数）が変わる
-// 絵はまだ無いので、四角と文字で仮に表示している
+// 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
+// キャラクターはドット絵（PixelArt.cs）。背景は電子回路の方眼をコードで描いている
 
 using System.Collections;
 using System.Collections.Generic;
@@ -15,12 +16,12 @@ using MagicBattle;
 
 public class MagicGame : MonoBehaviour
 {
-    static readonly Color Background = new Color(0.12f, 0.12f, 0.20f);
+    static readonly Color Background = new Color(0.04f, 0.06f, 0.12f);
     static readonly Color PanelColor = new Color(0.20f, 0.20f, 0.30f, 0.95f);
     static readonly Color ButtonColor = new Color(0.95f, 0.95f, 1f);
-    static readonly Color EnemyColor = new Color(0.30f, 0.55f, 0.30f);
+    static readonly Color EnemyColor = new Color(0.35f, 0.12f, 0.22f);
     static readonly Color TargetColor = new Color(1f, 0.85f, 0.2f);
-    static readonly Color[] AllyColors = { new Color(0.90f, 0.35f, 0.40f), new Color(0.35f, 0.60f, 0.95f), new Color(0.95f, 0.75f, 0.25f) };
+    static readonly Color[] AllyColors = { new Color(0.55f, 0.20f, 0.32f), new Color(0.16f, 0.30f, 0.58f), new Color(0.55f, 0.40f, 0.10f) };
     // ブロックの色（属性=紫, 対象=青, 威力=緑, 発射方法=ピンク, 追加効果=黄緑）
     static readonly Color[] BlockColors =
     {
@@ -99,7 +100,7 @@ public class MagicGame : MonoBehaviour
         for (int i = 0; i < robotTabs.Count; i++) robotTabs[i] = (battle.Allies[i], robotTabs[i].bg, robotTabs[i].text);
         phase = Phase.Planning;
         log.Clear();
-        AddLog("バトル開始！ まず「プログラムを組む」で魔法を作ろう");
+        AddLog("パソコンにウイルスが侵入！ 「プログラムを組む」で魔法を作って撃退しよう");
         BuildUnitViews();
         programScreen.SetActive(false);
         RefreshBattle();
@@ -130,7 +131,7 @@ public class MagicGame : MonoBehaviour
             if (battle.Won || battle.Lost)
             {
                 phase = Phase.Finished;
-                AddLog(battle.Won ? "勝利！" : "全滅…");
+                AddLog(battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…");
             }
             RefreshBattle();
             return;
@@ -246,7 +247,7 @@ public class MagicGame : MonoBehaviour
         turnText.text = "ターン " + battle.Turn;
         messageText.text = phase == Phase.Planning ? "プログラムを組んで「バトル開始」"
                          : phase == Phase.Running ? "バトル中…"
-                         : battle.Won ? "勝利！" : "全滅…";
+                         : battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…";
         var target = battle.CurrentTarget();
         foreach (var kv in cards)
         {
@@ -377,12 +378,26 @@ public class MagicGame : MonoBehaviour
         canvasGo.AddComponent<GraphicRaycaster>();
         root = (RectTransform)canvasGo.transform;
 
+        // 背景：パソコンの中（電子回路の方眼）
+        var bg = new GameObject("Background", typeof(RectTransform), typeof(RawImage));
+        var bgRt = (RectTransform)bg.transform;
+        bgRt.SetParent(root, false);
+        Place(bgRt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        var raw = bg.GetComponent<RawImage>();
+        raw.texture = CircuitTexture();
+        raw.uvRect = new Rect(0, 0, 1920f / 64f, 1080f / 64f);
+        raw.raycastTarget = false;
+
         // 上の帯
         var header = Box(root, new Color(0, 0, 0, 0.4f), new Vector2(0, 0.93f), new Vector2(1, 1));
         turnText = MakeText(header, "", 34, TextAnchor.MiddleLeft);
         Place(turnText.rectTransform, new Vector2(0, 0), new Vector2(0.3f, 1), new Vector2(30, 0), Vector2.zero);
         messageText = MakeText(header, "", 30, TextAnchor.MiddleCenter);
         Place(messageText.rectTransform, new Vector2(0.25f, 0), new Vector2(0.75f, 1), Vector2.zero, Vector2.zero);
+        var title = MakeText(header, "マジカルコンパイル", 30, TextAnchor.MiddleRight);
+        title.color = new Color(1f, 0.6f, 0.85f);
+        title.fontStyle = FontStyle.Bold;
+        Place(title.rectTransform, new Vector2(0.7f, 0), new Vector2(1, 1), Vector2.zero, new Vector2(-30, 0));
 
         // タイムライン（左から右へ進み、右端に着いたキャラから行動する）
         var tl = Box(root, new Color(0, 0, 0, 0), new Vector2(0.05f, 0.30f), new Vector2(0.95f, 0.44f));
@@ -427,8 +442,8 @@ public class MagicGame : MonoBehaviour
         }
 
         // タイムラインのアイコン（味方はバーの上、敵は下）
-        for (int i = 0; i < battle.Allies.Count; i++) icons[battle.Allies[i]] = MakeIcon(battle.Allies[i], AllyColors[i], 38f);
-        foreach (var e in battle.Enemies) icons[e] = MakeIcon(e, EnemyColor, -38f);
+        for (int i = 0; i < battle.Allies.Count; i++) icons[battle.Allies[i]] = MakeIcon(battle.Allies[i], AllyColors[i], 42f);
+        foreach (var e in battle.Enemies) icons[e] = MakeIcon(e, EnemyColor, -42f);
     }
 
     UnitCard MakeCard(Unit u, Color color, Vector2 min, Vector2 max)
@@ -443,15 +458,25 @@ public class MagicGame : MonoBehaviour
         Place(name.rectTransform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -56), new Vector2(0, -10));
         name.fontStyle = FontStyle.Bold;
 
-        var hpBack = Box(rect, new Color(0, 0, 0, 0.5f), new Vector2(0.08f, 0.68f), new Vector2(0.92f, 0.74f));
+        // ドット絵
+        var art = new GameObject("Art", typeof(RectTransform), typeof(Image));
+        var artRt = (RectTransform)art.transform;
+        artRt.SetParent(rect, false);
+        Place(artRt, new Vector2(0, 0.40f), new Vector2(1, 0.88f), Vector2.zero, Vector2.zero);
+        var artImg = art.GetComponent<Image>();
+        artImg.sprite = PixelSprite(u.Art, false);
+        artImg.preserveAspect = true;
+        artImg.raycastTarget = false;
+
+        var hpBack = Box(rect, new Color(0, 0, 0, 0.5f), new Vector2(0.08f, 0.33f), new Vector2(0.92f, 0.38f));
         var hpFill = Box(hpBack, new Color(0.4f, 1f, 0.5f), Vector2.zero, Vector2.one).GetComponent<Image>();
         hpFill.type = Image.Type.Filled;
         hpFill.fillMethod = Image.FillMethod.Horizontal;
         hpFill.sprite = WhiteSprite();
         var hpText = MakeText(rect, "", 22, TextAnchor.MiddleCenter);
-        Place(hpText.rectTransform, new Vector2(0, 0.56f), new Vector2(1, 0.67f), Vector2.zero, Vector2.zero);
-        var info = MakeText(rect, "", 20, TextAnchor.UpperCenter);
-        Place(info.rectTransform, new Vector2(0, 0), new Vector2(1, 0.55f), new Vector2(8, 8), new Vector2(-8, 0));
+        Place(hpText.rectTransform, new Vector2(0, 0.25f), new Vector2(1, 0.33f), Vector2.zero, Vector2.zero);
+        var info = MakeText(rect, "", 19, TextAnchor.UpperCenter);
+        Place(info.rectTransform, new Vector2(0, 0), new Vector2(1, 0.25f), new Vector2(6, 4), new Vector2(-6, 0));
 
         return new UnitCard { Rect = rect, Frame = frame, HpFill = hpFill, HpText = hpText, InfoText = info };
     }
@@ -459,10 +484,17 @@ public class MagicGame : MonoBehaviour
     RectTransform MakeIcon(Unit u, Color color, float y)
     {
         var icon = Box(timelineBar, color, new Vector2(0, 0.5f), new Vector2(0, 0.5f));
-        icon.sizeDelta = new Vector2(52, 52);
+        icon.pivot = new Vector2(0.5f, 0.5f);
+        icon.sizeDelta = new Vector2(60, 60);
         icon.anchoredPosition = new Vector2(0, y);
-        var t = MakeText(icon, u.Short, 28, TextAnchor.MiddleCenter);
-        t.fontStyle = FontStyle.Bold;
+        icon.gameObject.AddComponent<Outline>().effectColor = Color.white;
+        var face = new GameObject("Face", typeof(RectTransform), typeof(Image));
+        var faceRt = (RectTransform)face.transform;
+        faceRt.SetParent(icon, false);
+        Place(faceRt, Vector2.zero, Vector2.one, new Vector2(3, 3), new Vector2(-3, -3));
+        var img = face.GetComponent<Image>();
+        img.sprite = PixelSprite(u.Art, u.IsAlly); // 味方は顔だけ切り出す
+        img.raycastTarget = false;
         return icon;
     }
 
@@ -567,6 +599,64 @@ public class MagicGame : MonoBehaviour
         var suffix = MakeText(rect, "", 24, TextAnchor.MiddleLeft);
         Place(suffix.rectTransform, Vector2.zero, Vector2.one, new Vector2(136, 0), Vector2.zero);
         view.SetLabels(valueText, suffix);
+    }
+
+    // ================= ドット絵 =================
+
+    static readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
+
+    // PixelArt.cs の文字の並びから絵を作る。head = true なら顔のまわりだけ切り出す
+    static Sprite PixelSprite(string name, bool head)
+    {
+        string key = name + (head ? ":head" : "");
+        if (spriteCache.TryGetValue(key, out var cached)) return cached;
+        var rows = PixelArt.Sprites[name];
+        var pal = new Dictionary<char, Color>();
+        foreach (var kv in PixelArt.Common) pal[kv.Key] = Hex(kv.Value);
+        foreach (var kv in PixelArt.Palettes[name]) pal[kv.Key] = Hex(kv.Value);
+        int h = rows.Length, w = rows[0].Length;
+        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;   // ドットをぼかさない
+        tex.wrapMode = TextureWrapMode.Clamp;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                char c = rows[y][x];
+                tex.SetPixel(x, h - 1 - y, c == '.' || !pal.ContainsKey(c) ? new Color(0, 0, 0, 0) : pal[c]);
+            }
+        tex.Apply();
+        var r = head ? new Rect(4, h - 24, 24, 24) : new Rect(0, 0, w, h);
+        var sp = Sprite.Create(tex, r, new Vector2(0.5f, 0.5f), 32f);
+        spriteCache[key] = sp;
+        return sp;
+    }
+
+    static Color Hex(string s)
+    {
+        int v = System.Convert.ToInt32(s, 16);
+        return new Color(((v >> 16) & 255) / 255f, ((v >> 8) & 255) / 255f, (v & 255) / 255f);
+    }
+
+    // 背景の方眼（64×64 をくり返す。細い線と、ところどころ回路の点）
+    static Texture2D CircuitTexture()
+    {
+        var tex = new Texture2D(64, 64, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        var bg = Background;
+        var line = new Color(0.08f, 0.16f, 0.26f);
+        var dot = new Color(0.15f, 0.45f, 0.55f);
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++)
+            {
+                var c = bg;
+                if (x == 0 || y == 0) c = line;
+                if ((x == 32 && y < 32) || (y == 40 && x > 32)) c = line;
+                if ((x >= 30 && x <= 34 && y >= 30 && y <= 34) || (x >= 46 && x <= 48 && y >= 39 && y <= 41)) c = dot;
+                tex.SetPixel(x, y, c);
+            }
+        tex.Apply();
+        return tex;
     }
 
     // ================= 部品 =================

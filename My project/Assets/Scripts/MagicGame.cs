@@ -693,7 +693,7 @@ public partial class MagicGame : MonoBehaviour
         }
         if (hasRepeat) MakeBlock(paletteList, new Block(BlockKind.Repeat), true);
         paletteHint = MakeText(paletteList, linkMode
-            ? "リンク：メモリ2人分・属性ブロック2つまで・威力200/400が使える。マジカルリンクは残りのメモリ全部で威力アップ"
+            ? "リンク：メモリ2人分。マジカルリンクは1つだけ置いても完成するコンビ魔法（2人の得意な属性で敵全体へ）。ほかのブロックも足せる"
             : "ドラッグして右のコードへ。\n▼ をクリックで中身が変わる", 20, Ink, TextAnchor.UpperLeft, false);
         paletteHint.gameObject.AddComponent<LayoutElement>().preferredHeight = 70;
     }
@@ -747,6 +747,7 @@ public partial class MagicGame : MonoBehaviour
         {
             var s = Compiler.Build(code, cap);
             s.Partner = linkPartner;
+            if (linkMode) Compiler.ApplyLinkElements(s, editing, linkPartner);
             var t = battle.CurrentTarget();
             int dmg = Battle.Damage(editing, s, t);
             float eff = Battle.Effectiveness(s, t);

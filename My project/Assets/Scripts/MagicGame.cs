@@ -7,6 +7,9 @@
 //                   ウイルスをクリックすると「1体」の魔法でねらう敵を選べる
 //   プログラム画面: 左の手持ちブロックをドラッグして中央のコードに置く。コードの外へドラッグすると消える
 //                   ブロックの ▼ の部分をクリックすると中身が変わる。「送信」でロボットに送る
+//   チャージ:       そのターンは魔法を打たず、次のターンのメモリ容量と攻撃力が上がる
+//   リンクプログラム: ペアのロボットを選び、2人分のメモリで1つの魔法を組む（1試合2回まで）。
+//                   属性ブロック2つ・威力200/400・マジカルリンク（残りのメモリ全部で威力アップ）が使える
 //
 // 絵はすべてドット絵（ArtData.cs）。部品の形は UiKit.cs がコードで作る
 
@@ -30,8 +33,9 @@ public class MagicGame : MonoBehaviour
     // ブロックの色（属性=青, 対象=紫, 威力=緑, 発射方法=ピンク, 追加効果=黄土）
     static readonly Color[] BlockColors =
     {
-        UiKit.Hex("4a8fe0"), UiKit.Hex("7c5cc9"), UiKit.Hex("2fae4a"), UiKit.Hex("e0408a"), UiKit.Hex("a39b3a"),
+        UiKit.Hex("4a8fe0"), UiKit.Hex("7c5cc9"), UiKit.Hex("2fae4a"), UiKit.Hex("e0408a"), UiKit.Hex("a39b3a"), UiKit.Hex("ff7a1a"),
     };
+    static readonly Color ChargeColor = UiKit.Hex("ffd84a");
     static readonly Color StartColor = UiKit.Hex("f2b632");
 
     const float AllyScale = 6f;        // 戦闘画面のドット 1 つの大きさ
@@ -48,6 +52,9 @@ public class MagicGame : MonoBehaviour
     Battle battle;
     Phase phase = Phase.Title;
     readonly Dictionary<Unit, List<Block>> drafts = new Dictionary<Unit, List<Block>>(); // 組みかけのコード
+    readonly Dictionary<Unit, List<Block>> linkDrafts = new Dictionary<Unit, List<Block>>(); // 組みかけのリンクプログラム
+    bool linkMode;         // プログラム画面でリンクプログラムを組んでいる
+    Unit linkPartner;      // そのときのペアの相手
     Unit selected;         // 選んでいる味方（コマンドの持ち主）
     Unit editing;          // プログラム画面で組んでいる味方
     bool busy;             // 行動のアニメーション中はタイムラインを止める
@@ -71,6 +78,7 @@ public class MagicGame : MonoBehaviour
         public Image ArtImage;
         public Sprite Idle, Blink, Cast, Hurt;
         public RectTransform Ring;      // 足もとの魔法陣（選択中・ねらう敵）
+        public Image Aura;              // チャージ・リンクの光
         public RectTransform HpBox;     // 敵の HP の表示
         public Text HpText;
         public Image HpFill;
@@ -85,11 +93,14 @@ public class MagicGame : MonoBehaviour
         public bool Dying, Dead;
     }
     readonly Dictionary<Unit, UnitView> views = new Dictionary<Unit, UnitView>();
-    readonly Dictionary<Unit, (Text hp, Image fill, RectTransform box)> allyHud = new Dictionary<Unit, (Text, Image, RectTransform)>();
+    readonly Dictionary<Unit, (Text hp, Image fill, RectTransform box, Text status)> allyHud = new Dictionary<Unit, (Text, Image, RectTransform, Text)>();
     readonly Dictionary<Unit, RectTransform> icons = new Dictionary<Unit, RectTransform>();
     Text turnText, logText, commandTitle;
     RectTransform commandMenu, timelineBar, pointerLine, hudPanel;
     readonly List<Button> commandButtons = new List<Button>();
+    Text chargeLabel, linkLabel;
+    GameObject linkPicker;
+    RectTransform linkPickerList;
     GameObject resultPanel;
     Text resultText;
     readonly List<string> log = new List<string>();
@@ -98,7 +109,10 @@ public class MagicGame : MonoBehaviour
     GameObject programScreen;
     RectTransform codeArea, codeList, paletteList;
     Text memoryText, speedText, previewText, programMessage, bubbleText, robotName;
-    Image memoryFill, robotPortrait;
+    Image memoryFill, robotPortrait, partnerPortrait, headerImg;
+    Text headerText, paletteHint;
+    RectTransform tabsRoot;
+    GameObject cancelLinkButton;
     readonly List<(Unit unit, Image bg, Text text, Image face)> robotTabs = new List<(Unit, Image, Text, Image)>();
 
     // ================= 起動 =================
@@ -158,7 +172,10 @@ public class MagicGame : MonoBehaviour
         flying = 0;
         battle = new Battle(System.Environment.TickCount);
         drafts.Clear();
+        linkDrafts.Clear();
         foreach (var a in battle.Allies) drafts[a] = new List<Block>();
+        linkMode = false;
+        linkPartner = null;
         selected = editing = battle.Allies[0];
         for (int i = 0; i < robotTabs.Count; i++)
         {
@@ -172,6 +189,7 @@ public class MagicGame : MonoBehaviour
         BuildUnits();
         programScreen.SetActive(false);
         resultPanel.SetActive(false);
+        linkPicker.SetActive(false);
         RefreshBattle();
         StartCoroutine(Intro());
     }
@@ -201,7 +219,7 @@ public class MagicGame : MonoBehaviour
         }
         if (battle.TurnOver)
         {
-            battle.EndTurn();
+            foreach (var note in battle.EndTurn()) AddLog(note);
             phase = Phase.Planning;
             AddLog("ターン" + battle.Turn + "。プログラムを組み直すか、そのまま「バトル開始」");
             RefreshBattle();
@@ -258,16 +276,80 @@ public class MagicGame : MonoBehaviour
     {
         if (phase != Phase.Planning || intro) return;
         if (selected == null || !selected.Alive) selected = battle.Allies.Find(a => a.Alive);
-        editing = selected;
+        if (selected.LinkedTo != null) { AddLog(selected.Name + "は" + selected.LinkedTo.Name + "とリンク中なので、プログラムを組めません"); return; }
+        OpenProgram(selected, selected.LinkPartner);
+    }
+
+    // プログラム画面を開く。partner があればリンクプログラム
+    void OpenProgram(Unit main, Unit partner)
+    {
+        linkPicker.SetActive(false);
+        editing = main;
+        linkPartner = partner;
+        linkMode = partner != null;
+        if (linkMode && !linkDrafts.ContainsKey(main)) linkDrafts[main] = new List<Block>();
+        RebuildPalette();
         programScreen.SetActive(true);
         RefreshProgram();
-        StartCoroutine(Noise(0.2f, 0.3f));
+        StartCoroutine(Noise(0.2f, linkMode ? 0.5f : 0.3f));
+    }
+
+    // チャージ：そのターンは魔法を打たず、次のターンにパワーアップ
+    void OnChargeCommand()
+    {
+        if (phase != Phase.Planning || intro || selected == null || !selected.Alive) return;
+        if (selected.LinkPartner != null || selected.LinkedTo != null) { AddLog("リンク中はチャージできません"); return; }
+        bool on = !selected.Charging;
+        battle.SetCharge(selected, on);
+        AddLog(on ? selected.Name + "はこのターン、チャージする（次のターン メモリ容量と攻撃力がアップ）" : selected.Name + "のチャージをやめた");
+        if (on) StartCoroutine(ChargeFx(views[selected], 0.5f));
+        RefreshBattle();
+    }
+
+    // リンクプログラム：ペアになるロボットを選ぶ
+    void OnLinkCommand()
+    {
+        if (phase != Phase.Planning || intro || selected == null || !selected.Alive) return;
+        if (selected.LinkedTo != null) { AddLog(selected.Name + "は" + selected.LinkedTo.Name + "とリンク中です"); return; }
+        if (selected.LinkPartner != null) { OpenProgram(selected, selected.LinkPartner); return; }
+        if (battle.LinksLeft <= 0) { AddLog("リンクプログラムはこの試合ではもう使えません"); return; }
+        ClearChildren(linkPickerList);
+        foreach (var u in battle.Allies)
+        {
+            if (u == selected || !u.Alive || u.LinkPartner != null || u.LinkedTo != null) continue;
+            var partner = u;
+            var b = CommandButton(linkPickerList, "", 34, () => OpenProgram(selected, partner), false);
+            b.gameObject.AddComponent<LayoutElement>().preferredHeight = 90;
+            var face = Img(b.transform, UiKit.Art(u.Art + "_idle", FaceCrop), Color.white);
+            face.preserveAspect = true;
+            Anchor(face.rectTransform, 0, 0, 0, 1, 24, 4, 110, -4);
+            var t = MakeText(b.transform, u.Name + "　<size=22>" + u.TraitName() + "</size>", 34, UiKit.Hex("a8f4ff"), TextAnchor.MiddleLeft, true);
+            t.supportRichText = true;
+            Anchor(t.rectTransform, 0, 0, 1, 1, 124, 0, 0, 0);
+        }
+        if (linkPickerList.childCount == 0) { AddLog("ペアになれるロボットがいません"); return; }
+        linkPicker.SetActive(true);
+    }
+
+    void OnCancelLink()
+    {
+        if (editing == null || editing.LinkPartner == null) return;
+        AddLog(editing.Name + "と" + editing.LinkPartner.Name + "のリンクをやめた");
+        battle.CancelLink(editing);
+        programScreen.SetActive(false);
+        RefreshBattle();
     }
 
     void OnNotReady(string name)
     {
         AddLog(name + "はまだ準備中です");
     }
+
+    int ProgramCapacity() => linkMode ? battle.LinkCapacity(editing, linkPartner) : battle.CapacityOf(editing);
+    List<Block> CurrentCode() => linkMode ? linkDrafts[editing] : drafts[editing];
+
+    // 魔法の処理速度の表示に使うメモリ容量
+    int SpellCapacity(Unit u) => u.Spell != null && u.Spell.IsLink && u.LinkPartner != null ? battle.LinkCapacity(u, u.LinkPartner) : battle.CapacityOf(u);
 
     void OnStartButton()
     {
@@ -281,17 +363,28 @@ public class MagicGame : MonoBehaviour
 
     void OnSend()
     {
-        var code = drafts[editing];
-        if (!Compiler.Check(code, editing.Capacity, out string msg))
+        var code = CurrentCode();
+        int cap = ProgramCapacity();
+        if (!Compiler.Check(code, cap, out string msg, linkMode))
         {
             programMessage.text = "送信できません：" + msg;
             programMessage.color = UiKit.Hex("e0284a");
             StartCoroutine(Shake(programMessage.rectTransform));
             return;
         }
-        var spell = Compiler.Build(code);
-        battle.SetSpell(editing, spell);
-        programMessage.text = "送信しました！ " + editing.Name + "：" + spell.Describe();
+        var spell = Compiler.Build(code, cap);
+        if (linkMode)
+        {
+            if (!battle.Link(editing, linkPartner, spell))
+            {
+                programMessage.text = "送信できません：リンクプログラムはもう使えません";
+                programMessage.color = UiKit.Hex("e0284a");
+                return;
+            }
+            StartCoroutine(Noise(0.4f, 0.6f));
+        }
+        else battle.SetSpell(editing, spell);
+        programMessage.text = "送信しました！ " + editing.Name + (linkMode ? "＆" + linkPartner.Name : "") + "：" + spell.Describe();
         programMessage.color = UiKit.Hex("1e9a4a");
         AddLog(editing.Name + "にプログラムを送信（" + spell.Describe() + "）");
         RefreshBattle();
@@ -303,7 +396,7 @@ public class MagicGame : MonoBehaviour
 
     public void OnBlockDropped(BlockView view, Vector2 screenPos)
     {
-        var code = drafts[editing];
+        var code = CurrentCode();
         bool overCode = RectTransformUtility.RectangleContainsScreenPoint(codeArea, screenPos, null);
         int from = view.FromPalette ? -1 : code.IndexOf(view.Data);
         if (from >= 0) code.RemoveAt(from);
@@ -326,7 +419,7 @@ public class MagicGame : MonoBehaviour
 
     public void OnBlockValueClicked(BlockView view)
     {
-        view.Data.Value = (view.Data.Value + 1) % Blocks.OptionCount(view.Data.Kind);
+        view.Data.Value = (view.Data.Value + 1) % Blocks.OptionCount(view.Data.Kind, linkMode);
         view.RefreshLabels();
         if (!view.FromPalette) RefreshProgram();
     }
@@ -346,6 +439,9 @@ public class MagicGame : MonoBehaviour
                 bool sel = u == selected && phase == Phase.Planning;
                 v.Ring.gameObject.SetActive(sel && !v.Dead);
                 var hud = allyHud[u];
+                hud.status.text = StatusOf(u);
+                v.Aura.gameObject.SetActive(!v.Dead && (u.Charging || u.Charged || u.LinkPartner != null || u.LinkedTo != null));
+                v.Aura.color = u.LinkPartner != null || u.LinkedTo != null ? new Color(1f, 0.4f, 0.85f, 0.6f) : u.Charged ? new Color(1f, 0.85f, 0.2f, 0.75f) : new Color(1f, 0.85f, 0.2f, 0.4f);
                 hud.hp.text = "HP" + v.ShownHp;
                 hud.fill.fillAmount = (float)v.ShownHp / u.MaxHp;
                 hud.box.GetComponent<CanvasGroup>().alpha = v.ShownHp > 0 ? 1f : 0.4f;
@@ -362,14 +458,51 @@ public class MagicGame : MonoBehaviour
         bool plan = phase == Phase.Planning && !intro;
         commandMenu.gameObject.SetActive(plan);
         if (selected != null)
-            commandTitle.text = selected.Name + "　<size=22>" + selected.TraitName() + "</size>\n<size=22>"
-                + (selected.Spell == null ? "プログラム：まだ無い" : selected.Spell.Describe() + "（" + Compiler.SpeedLabel(selected.Spell.Memory, selected.Capacity) + "）") + "</size>";
+        {
+            string st = StatusOf(selected);
+            commandTitle.text = selected.Name + "　<size=22>" + selected.TraitName() + (st != "" ? "　[" + st + "]" : "") + "</size>\n<size=22>"
+                + (selected.LinkedTo != null ? selected.LinkedTo.Name + "にメモリを貸している"
+                   : selected.Charging ? "このターンはチャージ"
+                   : selected.Spell == null ? "プログラム：まだ無い"
+                   : selected.Spell.Describe() + "（" + Compiler.SpeedLabel(selected.Spell.Memory, SpellCapacity(selected)) + "）") + "</size>";
+            chargeLabel.text = selected.Charging ? "チャージをやめる" : "チャージ";
+        }
+        linkLabel.text = "リンクプログラム <size=24>残り" + battle.LinksLeft + "</size>";
         foreach (var b in commandButtons) b.interactable = plan;
+    }
+
+    // 味方の状態（HP の下と、コマンドの見出しに出す）
+    static string StatusOf(Unit u)
+    {
+        if (u.LinkPartner != null) return "リンク：" + u.LinkPartner.Name;
+        if (u.LinkedTo != null) return "リンク：" + u.LinkedTo.Name;
+        if (u.Charging) return "チャージ中";
+        if (u.Charged) return "パワーアップ";
+        if (u.Spell != null) return "送信済み";
+        return "";
+    }
+
+    // 手持ちブロックを並べ直す（リンクのときはマジカルリンクのブロックが増える）
+    void RebuildPalette()
+    {
+        ClearChildren(paletteList);
+        foreach (var k in linkMode ? Blocks.LinkOrder : Blocks.Order) MakeBlock(paletteList, new Block(k), true);
+        paletteHint = MakeText(paletteList, linkMode
+            ? "リンク：メモリ2人分・属性ブロック2つまで・威力200/400が使える。マジカルリンクは残りのメモリ全部で威力アップ"
+            : "ドラッグして右のコードへ。\n▼ をクリックで中身が変わる", 20, Ink, TextAnchor.UpperLeft, false);
+        paletteHint.gameObject.AddComponent<LayoutElement>().preferredHeight = 70;
     }
 
     void RefreshProgram(bool keepMessage = false)
     {
-        var code = drafts[editing];
+        var code = CurrentCode();
+        int cap = ProgramCapacity();
+        tabsRoot.gameObject.SetActive(!linkMode);
+        headerImg.color = linkMode ? Pink : UiKit.Hex("1e5cf0");
+        headerText.text = linkMode ? "リンクプログラム" : "プログラム";
+        cancelLinkButton.SetActive(linkMode && editing.LinkPartner != null);
+        partnerPortrait.gameObject.SetActive(linkMode);
+        if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(0, 0, 40, 44));
         foreach (var t in robotTabs)
         {
             bool sel = t.unit == editing;
@@ -377,9 +510,10 @@ public class MagicGame : MonoBehaviour
             t.text.color = sel ? Color.white : Ink;
             t.text.text = t.unit.Name + (t.unit.Spell != null ? "\n<size=18>送信済み</size>" : "") + (t.unit.Alive ? "" : "\n<size=18>戦闘不能</size>");
         }
-        robotName.text = editing.Name;
+        robotName.text = linkMode ? editing.Name + "＋" + linkPartner.Name : editing.Name;
         robotPortrait.sprite = UiKit.Art(editing.Art + "_idle", new RectInt(0, 0, 40, 44));
-        bubbleText.text = editing.TraitName().Replace(" ", "\n");
+        bubbleText.text = linkMode ? editing.TraitName() + "\n＋\n" + linkPartner.TraitName() : editing.TraitName().Replace(" ", "\n");
+        bubbleText.fontSize = linkMode ? 26 : 36;
 
         // コードを並べ直す（スタートとフィニッシュはそのまま）
         for (int i = codeList.childCount - 1; i >= 0; i--)
@@ -391,18 +525,20 @@ public class MagicGame : MonoBehaviour
         foreach (var b in code) MakeBlock(codeList, b, false);
         if (finish != null) finish.SetAsLastSibling();
 
-        int used = Compiler.MemoryUsed(code);
-        memoryText.text = used + " / " + editing.Capacity;
-        memoryFill.fillAmount = Mathf.Clamp01((float)used / editing.Capacity);
-        memoryFill.color = used > editing.Capacity ? UiKit.Hex("ff3b5c") : UiKit.Hex("3fb8ff");
-        string sp = Compiler.SpeedLabel(used, editing.Capacity);
+        int used = Compiler.MemoryUsed(code, cap);
+        memoryText.text = used + " / " + cap + (editing.Charged ? " <size=22>チャージ+30%</size>" : "");
+        memoryText.supportRichText = true;
+        memoryFill.fillAmount = Mathf.Clamp01((float)used / cap);
+        memoryFill.color = used > cap ? UiKit.Hex("ff3b5c") : linkMode ? Pink : UiKit.Hex("3fb8ff");
+        string sp = Compiler.SpeedLabel(used, cap);
         speedText.text = sp;
         speedText.color = sp == "速い" ? UiKit.Hex("2a7de8") : sp == "ふつう" ? UiKit.Hex("2a9a4a") : UiKit.Hex("e0284a");
 
-        bool ok = Compiler.Check(code, editing.Capacity, out string msg);
+        bool ok = Compiler.Check(code, cap, out string msg, linkMode);
         if (ok)
         {
-            var s = Compiler.Build(code);
+            var s = Compiler.Build(code, cap);
+            s.Partner = linkPartner;
             var t = battle.CurrentTarget();
             int dmg = Battle.Damage(editing, s, t);
             previewText.text = "見込み：1発 " + dmg + " ダメージ × " + s.Shots + "回" + (s.Target == TargetType.All ? "（敵全員）" : "（" + (t != null ? t.Name : "-") + "）");
@@ -459,6 +595,8 @@ public class MagicGame : MonoBehaviour
                 }
             }
             if (v.Ring.gameObject.activeSelf) v.Ring.localRotation = Quaternion.Euler(0, 0, t * 40f);
+            if (v.Aura != null && v.Aura.gameObject.activeSelf)
+                v.Aura.rectTransform.localScale = Vector3.one * (1f + 0.08f * Mathf.Sin(t * 5f + v.Phase));
         }
     }
 
@@ -474,22 +612,48 @@ public class MagicGame : MonoBehaviour
         RectTransform icon;
         if (icons.TryGetValue(r.Actor, out icon)) StartCoroutine(Bump(icon));
 
-        if (r.Actor.IsAlly && r.Actor.Spell != null)
+        if (r.Actor.IsAlly && r.Actor.LinkedTo != null)
+        {
+            // リンクの相手：メモリを貸している（ピンクの光）
+            Burst(actor.Art.TransformPoint(new Vector3(0, actor.Size.y * 0.5f, 0)), Pink, 10, 10f, 160f);
+            yield return Lunge(actor, 1f, 8f);
+        }
+        else if (r.Actor.IsAlly && r.Actor.Charging)
+        {
+            yield return ChargeFx(actor, 0.8f);
+        }
+        else if (r.Actor.IsAlly && r.Actor.Spell != null)
         {
             var s = r.Actor.Spell;
             var color = ElementColor(s.Element);
-            // 詠唱：魔法のポーズ、手の前に魔法陣
+            var color2 = s.HasElement2 ? ElementColor(s.Element2) : color;
+            // 詠唱：魔法のポーズ、手の前に魔法陣。リンクなら相手も一緒に
             actor.ArtImage.sprite = actor.Cast;
-            actor.PoseTimer = 1.4f;
+            actor.PoseTimer = 1.6f;
+            RectTransform circle2 = null;
+            UnitView pv = null;
+            if (s.Partner != null) views.TryGetValue(s.Partner, out pv);
+            if (s.IsLink && pv != null && !pv.Dead)
+            {
+                pv.ArtImage.sprite = pv.Cast;
+                pv.PoseTimer = 1.6f;
+                circle2 = MagicCircleAt(pv, color2);
+                StartCoroutine(Lunge(pv, 1f, 18f));
+                StartCoroutine(Noise(0.4f, 0.5f));
+                AddLog("マジカルリンク！");
+            }
             var circle = MagicCircleAt(actor, color);
+            if (s.IsLink) { circle.sizeDelta *= 1.5f; StartCoroutine(ChargeFx(actor, 0.4f)); }
             yield return Lunge(actor, 1f, 18f);
-            bool blast = s.HasEffect && s.Effect == Effect.Blast;
+            bool big = (s.HasEffect && s.Effect == Effect.Blast) || s.IsLink;
+            int n = 0;
             foreach (var h in r.Hits)
             {
                 if (h.Heal) continue;
-                StartCoroutine(Projectile(actor, h, color, blast, s.HasEffect && s.Effect == Effect.Slow));
+                StartCoroutine(Projectile(actor, h, n++ % 2 == 0 ? color : color2, big, s.HasEffect && s.Effect == Effect.Slow));
                 yield return new WaitForSeconds(0.12f);
             }
+            if (circle2 != null) Destroy(circle2.gameObject);
             while (flying > 0) yield return null;
             if (circle != null) Destroy(circle.gameObject);
             foreach (var h in r.Hits)
@@ -535,6 +699,29 @@ public class MagicGame : MonoBehaviour
             rt.localScale = new Vector3(0.45f, 1f, 1f);
             yield return null;
         }
+    }
+
+    // チャージ：足もとから黄色い光が立ちのぼる
+    IEnumerator ChargeFx(UnitView v, float dur)
+    {
+        float spawn = 0f;
+        for (float t = 0f; t < dur; t += Time.deltaTime)
+        {
+            if (v.Art == null) yield break;
+            spawn -= Time.deltaTime;
+            if (spawn <= 0f)
+            {
+                spawn = 0.03f;
+                var p = v.Art.TransformPoint(new Vector3(Random.Range(-0.4f, 0.4f) * v.Size.x, Random.Range(0f, 0.3f) * v.Size.y, 0));
+                var sq = Box(effects, ChargeColor);
+                sq.sizeDelta = Vector2.one * Random.Range(8f, 16f);
+                sq.position = p;
+                StartCoroutine(Spark(sq, new Vector2(Random.Range(-20f, 20f), Random.Range(180f, 320f))));
+            }
+            v.ArtImage.color = Color.Lerp(Color.white, new Color(1f, 0.95f, 0.6f), 0.5f + 0.5f * Mathf.Sin(t * 20f));
+            yield return null;
+        }
+        if (v.ArtImage != null) v.ArtImage.color = Color.white;
     }
 
     // 相手の方へ踏み込んで戻る
@@ -1109,13 +1296,16 @@ public class MagicGame : MonoBehaviour
         commandTitle.supportRichText = true;
         Anchor(commandTitle.rectTransform, 0, 0, 1, 1, 16, 4, -10, -4);
         var names = new[] { "プログラム", "アイテム", "チャージ", "リンクプログラム" };
+        var acts = new UnityEngine.Events.UnityAction[] { OnProgramCommand, () => OnNotReady("アイテム"), OnChargeCommand, OnLinkCommand };
         for (int i = 0; i < names.Length; i++)
         {
-            string n = names[i];
-            UnityEngine.Events.UnityAction act = i == 0 ? (UnityEngine.Events.UnityAction)OnProgramCommand : () => OnNotReady(n);
-            var b = CommandButton(commandMenu, n, 34, act, false);
+            var b = CommandButton(commandMenu, names[i], 34, acts[i], false);
             Anchor((RectTransform)b.transform, i * 0.03f, 0.64f - i * 0.135f, 1f, 0.76f - i * 0.135f);
-            if (i > 0) b.GetComponentInChildren<Text>().color = new Color(0.55f, 0.6f, 0.65f);
+            var label = b.GetComponentInChildren<Text>();
+            label.supportRichText = true;
+            if (i == 1) label.color = new Color(0.55f, 0.6f, 0.65f);   // アイテムはまだ
+            if (i == 2) chargeLabel = label;
+            if (i == 3) linkLabel = label;
             commandButtons.Add(b);
         }
         var go = CommandButton(commandMenu, "バトル開始", 38, OnStartButton, true);
@@ -1157,6 +1347,25 @@ public class MagicGame : MonoBehaviour
         var back = CommandButton(rp.rectTransform, "タイトルへ", 36, ShowTitle, false);
         Anchor((RectTransform)back.transform, 0.52f, 0.26f, 0.7f, 0.34f);
         resultPanel.SetActive(false);
+
+        // リンクプログラムのペア選び
+        var lp = Img(battleLayer, null, new Color(0, 0, 0, 0.55f));
+        lp.raycastTarget = true;
+        Fill(lp.rectTransform);
+        linkPicker = lp.gameObject;
+        var box = Img(lp.rectTransform, UiKit.RoundRect(24), new Color(0.08f, 0.05f, 0.16f, 0.95f));
+        box.type = Image.Type.Sliced;
+        Anchor(box.rectTransform, 0.32f, 0.3f, 0.68f, 0.72f);
+        var lt = MakeText(box.rectTransform, "ペアになるロボットを選ぼう", 36, Pink, TextAnchor.MiddleCenter, true);
+        Anchor(lt.rectTransform, 0, 0.82f, 1, 0.97f);
+        var note = MakeText(box.rectTransform, "メモリが2人分になり、ペアの特性も効く。ペアの相手はこのターン魔法を打てない", 20, Color.white, TextAnchor.MiddleCenter, false);
+        Anchor(note.rectTransform, 0.04f, 0.7f, 0.96f, 0.82f);
+        linkPickerList = NewRect(box.rectTransform, "List");
+        Anchor(linkPickerList, 0.06f, 0.2f, 0.94f, 0.68f);
+        AddVertical(linkPickerList, 14);
+        var cancel = CommandButton(box.rectTransform, "キャンセル", 30, () => linkPicker.SetActive(false), false);
+        Anchor((RectTransform)cancel.transform, 0.3f, 0.04f, 0.7f, 0.15f);
+        linkPicker.SetActive(false);
     }
 
     void BuildUnits()
@@ -1204,10 +1413,13 @@ public class MagicGame : MonoBehaviour
             Fill(fill.rectTransform);
             fill.type = Image.Type.Filled;
             fill.fillMethod = Image.FillMethod.Horizontal;
+            var status = MakeText(box, "", 22, Color.white, TextAnchor.MiddleCenter, true);
+            Anchor(status.rectTransform, 0, 0.38f, 1, 0.52f);
+            AddOutline(status, Color.black, 2f);
             var btn = box.gameObject.AddComponent<Button>();
             btn.targetGraphic = plate;
             btn.onClick.AddListener(() => OnAllyClicked(u));
-            allyHud[u] = (hp, fill, box);
+            allyHud[u] = (hp, fill, box, status);
         }
 
         // タイムラインのアイコン（味方は顔でバーの上、敵はバーの下）
@@ -1230,6 +1442,10 @@ public class MagicGame : MonoBehaviour
         v.Ring = Img(ringFlat, UiKit.MagicCircle(), u.IsAlly ? new Color(1f, 0.35f, 0.8f, 0.9f) : new Color(1f, 0.25f, 0.3f, 0.9f)).rectTransform;
         v.Ring.sizeDelta = new Vector2(36, 36) * scale;
 
+        v.Aura = Img(v.Root, UiKit.Glow(), ChargeColor);
+        v.Aura.rectTransform.anchoredPosition = new Vector2(0, UiKit.ArtSize(idle).y * scale * 0.45f);
+        v.Aura.rectTransform.sizeDelta = new Vector2(52, 60) * scale;
+        v.Aura.gameObject.SetActive(false);
         v.ArtImage = Img(v.Root, UiKit.Art(idle), Color.white);
         v.Art = v.ArtImage.rectTransform;
         v.Art.pivot = new Vector2(0.5f, 0f);
@@ -1325,19 +1541,21 @@ public class MagicGame : MonoBehaviour
         ambient.StartCoroutine(SpinForever(mc, 5f));
 
         // 見出し（青い斜めの帯）
-        var header = Img(screen, UiKit.Slant(), UiKit.Hex("1e5cf0"));
-        header.type = Image.Type.Sliced;
-        Anchor(header.rectTransform, -0.02f, 0.9f, 0.26f, 0.98f);
-        var ht = MakeText(header.rectTransform, "プログラム", 52, Color.white, TextAnchor.MiddleCenter, true);
-        ht.fontStyle = FontStyle.BoldAndItalic;
-        AddOutline(ht, UiKit.Hex("0a1c60"), 3f);
+        headerImg = Img(screen, UiKit.Slant(), UiKit.Hex("1e5cf0"));
+        headerImg.type = Image.Type.Sliced;
+        Anchor(headerImg.rectTransform, -0.02f, 0.9f, 0.28f, 0.98f);
+        headerText = MakeText(headerImg.rectTransform, "プログラム", 52, Color.white, TextAnchor.MiddleCenter, true);
+        headerText.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(headerText, UiKit.Hex("0a1c60"), 3f);
+        tabsRoot = NewRect(screen, "Tabs");
+        Fill(tabsRoot);
 
         // ロボットを切りかえるタブ（顔と名前）
         robotTabs.Clear();
         for (int i = 0; i < 3; i++)
         {
             int idx = i;
-            var tab = Img(screen, UiKit.RoundRect(18), Color.white);
+            var tab = Img(tabsRoot, UiKit.RoundRect(18), Color.white);
             tab.type = Image.Type.Sliced;
             tab.raycastTarget = true;
             Anchor(tab.rectTransform, 0.3f + i * 0.13f, 0.9f, 0.42f + i * 0.13f, 0.98f);
@@ -1347,8 +1565,8 @@ public class MagicGame : MonoBehaviour
             {
                 var u = battle.Allies[idx];
                 if (!u.Alive) return;
-                editing = u;
-                RefreshProgram();
+                if (u.LinkedTo != null) { programMessage.text = u.Name + "は" + u.LinkedTo.Name + "とリンク中です"; return; }
+                OpenProgram(u, u.LinkPartner);
             });
             var face = Img(tab.rectTransform, null, Color.white);
             face.preserveAspect = true;
@@ -1380,9 +1598,7 @@ public class MagicGame : MonoBehaviour
         paletteList = NewRect(palette.rectTransform, "List");
         Anchor(paletteList, 0, 0, 1, 1, 16, 16, -16, -70);
         AddVertical(paletteList, 12);
-        foreach (var k in Blocks.Order) MakeBlock(paletteList, new Block(k), true);
-        var hint = MakeText(paletteList, "ドラッグして右のコードへ。\n▼ をクリックで中身が変わる", 20, Ink, TextAnchor.UpperLeft, false);
-        hint.gameObject.AddComponent<LayoutElement>().preferredHeight = 70;
+        RebuildPalette();
 
         // コード
         var codeBg = Img(win.rectTransform, UiKit.RoundRect(18), UiKit.Hex("efc4e6"));
@@ -1402,6 +1618,9 @@ public class MagicGame : MonoBehaviour
         side.type = Image.Type.Sliced;
         var sideRt = side.rectTransform;
         Anchor(sideRt, 0.68f, 0.03f, 0.985f, 0.87f);
+        partnerPortrait = Img(sideRt, null, new Color(0.95f, 0.95f, 1f));
+        partnerPortrait.preserveAspect = true;
+        Anchor(partnerPortrait.rectTransform, 0.2f, 0.55f, 0.52f, 0.86f);
         robotPortrait = Img(sideRt, null, Color.white);
         robotPortrait.preserveAspect = true;
         Anchor(robotPortrait.rectTransform, 0.02f, 0.52f, 0.5f, 0.99f);
@@ -1455,6 +1674,9 @@ public class MagicGame : MonoBehaviour
         MakeText(send.rectTransform, "送信", 56, Ink, TextAnchor.MiddleCenter, false);
         var close = CommandButton(sideRt, "もどる", 30, () => { programScreen.SetActive(false); RefreshBattle(); }, false);
         Anchor((RectTransform)close.transform, 0.66f, 0.04f, 0.97f, 0.12f);
+        var cl = CommandButton(sideRt, "リンクをやめる", 22, OnCancelLink, false);
+        Anchor((RectTransform)cl.transform, 0.66f, 0.13f, 0.97f, 0.19f);
+        cancelLinkButton = cl.gameObject;
 
         programScreen.SetActive(false);
     }
@@ -1645,7 +1867,8 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
     public void RefreshLabels()
     {
         valueText.text = Blocks.Label(Data.Kind, Data.Value) + " ▼";
-        suffixText.text = Blocks.Suffix(Data.Kind) + "  <size=18>(" + Blocks.Memory(Data.Kind, Data.Value) + ")</size>";
+        string mem = Data.Kind == BlockKind.MagicLink ? "残り全部" : Blocks.Memory(Data.Kind, Data.Value).ToString();
+        suffixText.text = Blocks.Suffix(Data.Kind) + "  <size=18>(" + mem + ")</size>";
     }
 
     public void OnBeginDrag(PointerEventData e)

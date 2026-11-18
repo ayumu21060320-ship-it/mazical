@@ -463,9 +463,22 @@ public partial class MagicGame : MonoBehaviour
         decided.Add(u);
         if (u.LinkPartner != null) decided.Add(u.LinkPartner);
         NextCommand();
-        if (AllDecided()) AddLog("全員の行動が決まった！「バトル開始」で戦闘へ");
-        else AddLog(selected.Name + "の行動を選んでください");
+        if (AllDecided())
+        {
+            AddLog("全員の行動が決まった！ 戦闘開始！");
+            RefreshBattle();
+            StartCoroutine(AutoStart());
+            return;
+        }
+        AddLog(selected.Name + "の行動を選んでください");
         RefreshBattle();
+    }
+
+    // 全員の行動が決まったら、少し間をおいて自動で戦闘を始める
+    IEnumerator AutoStart()
+    {
+        yield return new WaitForSeconds(0.5f);
+        if (phase == Phase.Planning && !intro && AllDecided()) OnStartButton();
     }
 
     // ピンクのボタン：まだ決めていない人がいれば「前と同じで決定」、全員決まったら「バトル開始」

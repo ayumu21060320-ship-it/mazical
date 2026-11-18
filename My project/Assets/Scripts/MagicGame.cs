@@ -478,7 +478,12 @@ public partial class MagicGame : MonoBehaviour
         {
             if (!overCode) { RefreshProgram(); return; }
             var group = new List<Block> { view.Data.Clone() };
-            if (view.Data.Kind == BlockKind.If) { group.Add(new Block(BlockKind.Else)); group.Add(new Block(BlockKind.EndIf)); }
+            group[0].WithElse = false;
+            if (view.Data.Kind == BlockKind.If)
+            {
+                if (view.Data.WithElse) group.Add(new Block(BlockKind.Else));
+                group.Add(new Block(BlockKind.EndIf));
+            }
             if (view.Data.Kind == BlockKind.Repeat) group.Add(new Block(BlockKind.EndRepeat));
             code.InsertRange(k, group);
         }
@@ -591,7 +596,11 @@ public partial class MagicGame : MonoBehaviour
         // （起動したときはまだだれも選んでいないので、editing が無いこともある）
         bool hasIf = editing != null && (editing.HasMod(Modules.If) || (linkMode && linkPartner != null && linkPartner.HasMod(Modules.If)));
         bool hasRepeat = editing != null && (editing.HasMod(Modules.Repeat) || (linkMode && linkPartner != null && linkPartner.HasMod(Modules.Repeat)));
-        if (hasIf) MakeBlock(paletteList, new Block(BlockKind.If), true);
+        if (hasIf)
+        {
+            MakeBlock(paletteList, new Block(BlockKind.If), true);
+            MakeBlock(paletteList, new Block(BlockKind.If) { WithElse = true }, true);
+        }
         if (hasRepeat) MakeBlock(paletteList, new Block(BlockKind.Repeat), true);
         paletteHint = MakeText(paletteList, linkMode
             ? "リンク：メモリ2人分・属性ブロック2つまで・威力200/400が使える。マジカルリンクは残りのメモリ全部で威力アップ"
@@ -1919,9 +1928,7 @@ public partial class MagicGame : MonoBehaviour
         Anchor(palette.rectTransform, 0.02f, 0.03f, 0.37f, 0.97f);
         var pTitle = MakeText(palette.rectTransform, "手持ちブロック", 30, Ink, TextAnchor.UpperLeft, false);
         Anchor(pTitle.rectTransform, 0, 1, 1, 1, 18, -56, 0, -12);
-        paletteList = NewRect(palette.rectTransform, "List");
-        Anchor(paletteList, 0, 0, 1, 1, 16, 16, -16, -70);
-        AddVertical(paletteList, 12);
+        paletteList = ScrollArea(palette.rectTransform, 16, 16, -16, -70, 10);
         RebuildPalette();
 
         // コード
@@ -1931,9 +1938,7 @@ public partial class MagicGame : MonoBehaviour
         codeArea = codeBg.rectTransform;
         var cTitle = MakeText(codeArea, "コード", 30, Ink, TextAnchor.UpperLeft, false);
         Anchor(cTitle.rectTransform, 0, 1, 1, 1, 18, -56, 0, -12);
-        codeList = NewRect(codeArea, "Code");
-        Anchor(codeList, 0, 0, 1, 1, 34, 16, -34, -64);
-        AddVertical(codeList, -UiKit.BlockTabHeight + 2f);   // 下の出っぱりを次のブロックのへこみに重ねる
+        codeList = ScrollArea(codeArea, 34, 16, -34, -64, -UiKit.BlockTabHeight + 2f);   // 下の出っぱりを次のブロックのへこみに重ねる
         MakeCapBlock(codeList, "スタート", "Start", true);
         MakeCapBlock(codeList, "フィニッシュ", "Finish", false);
 
@@ -2025,55 +2030,115 @@ public partial class MagicGame : MonoBehaviour
         AddOutline(t, new Color(0.55f, 0.35f, 0f, 0.8f), 2f);
     }
 
-    const float Indent = 36f;   // 「もし」「繰り返す」の中のブロックのずれ
+    const float Indent = 28f;     // C の字の左の柱の太さ（中のブロックはこの分だけ右にずれる）
+    const float ArmWidth = 230f;  // C の字の「でなければ」「おわり」の腕の長さ
+    const float MouthHeight = 26f; // 中が空のときの口の高さ
 
     static Color BlockColor(BlockKind k) =>
         k == BlockKind.If || k == BlockKind.Else || k == BlockKind.EndIf ? UiKit.Hex("ffab19")
         : k == BlockKind.Repeat || k == BlockKind.EndRepeat ? UiKit.Hex("f0801e")
         : BlockColors[(int)k];
 
-    // コードを 1 行ずつ並べる。中のブロックは右にずらし、左に制御ブロックの色の帯を引く
+    // 中身を上下に動かせる（マウスホイール）入れ物を作り、ブロックを並べる中身を返す
+    RectTransform ScrollArea(RectTransform parent, float l, float b, float r, float t, float spacing)
+    {
+        var view = NewRect(parent, "Viewport");
+        Anchor(view, 0, 0, 1, 1, l, b, r, t);
+        view.gameObject.AddComponent<RectMask2D>();
+        var hit = view.gameObject.AddComponent<Image>();   // 空いている所でもホイールが効くように
+        hit.color = new Color(0, 0, 0, 0);
+        var content = NewRect(view, "Content");
+        content.anchorMin = new Vector2(0, 1);
+        content.anchorMax = new Vector2(1, 1);
+        content.pivot = new Vector2(0.5f, 1f);
+        content.offsetMin = content.offsetMax = Vector2.zero;
+        var v = content.gameObject.AddComponent<VerticalLayoutGroup>();
+        v.spacing = spacing;
+        v.childControlHeight = true;
+        v.childControlWidth = true;
+        v.childForceExpandHeight = false;
+        v.childForceExpandWidth = true;
+        v.padding = new RectOffset(0, 0, 10, 10);
+        content.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        var sr = view.gameObject.AddComponent<ScrollRect>();
+        sr.content = content;
+        sr.viewport = view;
+        sr.horizontal = false;
+        sr.vertical = true;
+        sr.movementType = ScrollRect.MovementType.Clamped;
+        sr.scrollSensitivity = 40f;
+        sr.inertia = false;
+        return content;
+    }
+
+    // コードを 1 行ずつ並べる。「もし」「繰り返す」は Scratch と同じ C の字：
+    //   上の腕（もし ○○ なら）・左の柱・下の腕（おわり）がつながって、中のブロックを囲む
     void BuildCodeRows(List<Block> code)
     {
         var open = new List<Color>();   // いま中にいる制御ブロックの色
-        foreach (var b in code)
+        for (int idx = 0; idx < code.Count; idx++)
         {
+            var b = code[idx];
             bool arm = b.Kind == BlockKind.Else || b.Kind == BlockKind.EndIf || b.Kind == BlockKind.EndRepeat;
             int depth = arm ? open.Count - 1 : open.Count;
-            float h = b.Kind == BlockKind.EndIf || b.Kind == BlockKind.EndRepeat ? 34f : b.Kind == BlockKind.Else ? 46f : 66f;
-            var row = NewRect(codeList, "Row");
-            row.gameObject.AddComponent<LayoutElement>().preferredHeight = h;
-            for (int d = 0; d < depth && d < open.Count; d++)   // 外側の C の字の左の帯
-            {
-                var bar = Img(row, null, open[d]).rectTransform;
-                Anchor(bar, 0, 0, 0, 1, d * Indent, -2, d * Indent + 16, 6);
-            }
             if (arm)
             {
                 var col = open.Count > 0 ? open[open.Count - 1] : BlockColor(b.Kind);
+                bool isElse = b.Kind == BlockKind.Else;
+                var row = CodeRow(open, depth, isElse ? 46f : 38f);
                 var shape = Img(row, UiKit.BlockShape(), col);
                 shape.type = Image.Type.Sliced;
-                Anchor(shape.rectTransform, 0, 0, 0, 1, depth * Indent, 0, depth * Indent + 260, 0);
+                Anchor(shape.rectTransform, 0, 0, 0, 1, depth * Indent, 0, depth * Indent + ArmWidth, 0);
+                var cornerUp = Img(row, null, col).rectTransform;   // 柱とつなぐ
+                Anchor(cornerUp, 0, 1, 0, 1, depth * Indent, -10, depth * Indent + Indent, 10);
                 var view = shape.gameObject.AddComponent<BlockView>();
                 view.Init(this, b, false, canvas);
                 view.Draggable = false;
-                if (b.Kind == BlockKind.Else)
+                if (isElse)
                 {
                     var t = MakeText(shape.rectTransform, "でなければ", 24, Color.white, TextAnchor.MiddleLeft, true);
                     Anchor(t.rectTransform, 0, 0, 1, 1, 20, UiKit.BlockTabHeight, 0, 0);
                 }
-                if (b.Kind != BlockKind.Else) open.RemoveAt(open.Count - 1);
+                if (b.Kind == BlockKind.EndRepeat)
+                {
+                    var up = MakeText(shape.rectTransform, "▲", 20, Color.white, TextAnchor.MiddleRight, true);
+                    Anchor(up.rectTransform, 0, 0, 1, 1, 0, UiKit.BlockTabHeight, -16, 0);
+                }
+                if (!isElse) open.RemoveAt(open.Count - 1);
+                // 「でなければ」の下が空なら口を開けておく
+                if (isElse && idx + 1 < code.Count && code[idx + 1].Kind == BlockKind.EndIf) CodeRow(open, open.Count, MouthHeight);
                 continue;
             }
-            var bv = MakeBlock(row, b, false);
+            var r = CodeRow(open, depth, 66f);
+            var bv = MakeBlock(r, b, false);
             Anchor((RectTransform)bv.transform, 0, 0, 1, 1, depth * Indent, 0, 0, 0);
-            if (b.Kind == BlockKind.If || b.Kind == BlockKind.Repeat) open.Add(BlockColor(b.Kind));
+            if (b.Kind == BlockKind.If || b.Kind == BlockKind.Repeat)
+            {
+                open.Add(BlockColor(b.Kind));
+                // 中が空なら口を開けておく（ここにドロップすると中に入る）
+                var next = idx + 1 < code.Count ? code[idx + 1].Kind : BlockKind.Element;
+                if (next == BlockKind.Else || next == BlockKind.EndIf || next == BlockKind.EndRepeat) CodeRow(open, open.Count, MouthHeight);
+            }
         }
+    }
+
+    // コードの 1 行の入れ物。外側の C の字の柱（左の帯）を、上下の行とつながるように少しはみ出して描く
+    RectTransform CodeRow(List<Color> open, int depth, float height)
+    {
+        var row = NewRect(codeList, "Row");
+        row.gameObject.AddComponent<LayoutElement>().preferredHeight = height;
+        for (int d = 0; d < depth && d < open.Count; d++)
+        {
+            var bar = Img(row, null, open[d]).rectTransform;
+            Anchor(bar, 0, 0, 0, 1, d * Indent, -10, d * Indent + Indent, 10);
+        }
+        return row;
     }
 
     BlockView MakeBlock(RectTransform parent, Block data, bool fromPalette)
     {
         var col = BlockColor(data.Kind);
+        if (fromPalette && (data.Kind == BlockKind.If || data.Kind == BlockKind.Repeat)) return MakePaletteC(parent, data, col);
         var img = Img(parent, UiKit.BlockShape(), col);
         img.type = Image.Type.Sliced;
         var rect = img.rectTransform;
@@ -2081,6 +2146,66 @@ public partial class MagicGame : MonoBehaviour
         rect.gameObject.AddComponent<LayoutElement>().preferredHeight = 66;
         var view = rect.gameObject.AddComponent<BlockView>();
         view.Init(this, data, fromPalette, canvas);
+        BlockFace(rect, data, view, col);
+        return view;
+    }
+
+    // 手持ちの「もし」「繰り返す」は C の字のまま見せる（企画書の形）
+    BlockView MakePaletteC(RectTransform parent, Block data, Color col)
+    {
+        bool withElse = data.Kind == BlockKind.If && data.WithElse;
+        float top = 66f, mouth = 22f, elseArm = 42f, bottom = 36f;
+        float h = top + mouth + bottom + (withElse ? elseArm + mouth : 0f) - UiKit.BlockTabHeight;
+        var root = Img(parent, null, new Color(1, 1, 1, 0));   // つかむための透明な入れ物
+        root.rectTransform.name = "Block";
+        root.gameObject.AddComponent<LayoutElement>().preferredHeight = h;
+        var view = root.gameObject.AddComponent<BlockView>();
+        view.Init(this, data, true, canvas);
+        var head = Img(root.rectTransform, UiKit.BlockShape(), col);
+        head.type = Image.Type.Sliced;
+        Anchor(head.rectTransform, 0, 1, 1, 1, 0, -top, 0, 0);
+        BlockFace(head.rectTransform, data, view, col);
+        float y = -top + UiKit.BlockTabHeight;
+        y = PaletteSpine(root.rectTransform, col, y, mouth);
+        if (withElse)
+        {
+            y = PaletteArm(root.rectTransform, col, y, elseArm, "でなければ", false);
+            y = PaletteSpine(root.rectTransform, col, y, mouth);
+        }
+        PaletteArm(root.rectTransform, col, y, bottom, "", data.Kind == BlockKind.Repeat);
+        return view;
+    }
+
+    // C の字の左の柱（y から下へ len）。次の y を返す
+    float PaletteSpine(RectTransform root, Color col, float y, float len)
+    {
+        var sp = Img(root, null, col).rectTransform;
+        Anchor(sp, 0, 1, 0, 1, 0, y - len - 6, Indent, y + 6);
+        return y - len;
+    }
+
+    // C の字の腕（「でなければ」や下の「おわり」）。次の y を返す
+    float PaletteArm(RectTransform root, Color col, float y, float armH, string label, bool arrow)
+    {
+        var a = Img(root, UiKit.BlockShape(), col);
+        a.type = Image.Type.Sliced;
+        Anchor(a.rectTransform, 0, 1, 0, 1, 0, y - armH, ArmWidth, y);
+        if (label != "")
+        {
+            var t = MakeText(a.rectTransform, label, 22, Color.white, TextAnchor.MiddleLeft, true);
+            Anchor(t.rectTransform, 0, 0, 1, 1, 18, UiKit.BlockTabHeight, 0, 0);
+        }
+        if (arrow)
+        {
+            var up = MakeText(a.rectTransform, "▲", 18, Color.white, TextAnchor.MiddleRight, true);
+            Anchor(up.rectTransform, 0, 0, 1, 1, 0, UiKit.BlockTabHeight, -14, 0);
+        }
+        return y - armH + UiKit.BlockTabHeight;
+    }
+
+    // ブロックの表の文字（▼ の付いた中身と、右側の言葉）
+    void BlockFace(RectTransform rect, Block data, BlockView view, Color col)
+    {
         // ▼ の付いた中身（クリックで変わる）
         var pill = Img(rect, UiKit.RoundRect(18), Color.Lerp(col, Color.black, 0.28f));
         pill.type = Image.Type.Sliced;
@@ -2103,7 +2228,6 @@ public partial class MagicGame : MonoBehaviour
         Anchor(suffix.rectTransform, 0, 0, 1, 1, left + width + 10, UiKit.BlockTabHeight, 0, 0);
         suffix.horizontalOverflow = HorizontalWrapMode.Overflow;   // 折り返さない（「なら」が縦にならないように）
         view.SetLabels(valueText, suffix);
-        return view;
     }
 
     // ================= 部品 =================

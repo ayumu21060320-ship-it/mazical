@@ -147,6 +147,7 @@ public partial class MagicGame : MonoBehaviour
         BuildHome();
         BuildCharacters();
         BuildBlockBook();
+        BuildVirusBook();
         BuildDesktop();
         effects = Layer("Effects");
         BuildProgramScreen();
@@ -529,6 +530,7 @@ public partial class MagicGame : MonoBehaviour
         if (u.LinkPartner != null) return "リンク：" + u.LinkPartner.Name;
         if (u.LinkedTo != null) return "リンク：" + u.LinkedTo.Name;
         if (u.Charging) return "チャージ中";
+        if (u.Locked) return "ロック中";
         if (u.Charged) return "パワーアップ";
         if (u.Spell != null) return "送信済み";
         return "";
@@ -593,7 +595,10 @@ public partial class MagicGame : MonoBehaviour
             s.Partner = linkPartner;
             var t = battle.CurrentTarget();
             int dmg = Battle.Damage(editing, s, t);
-            previewText.text = "見込み：1発 " + dmg + " ダメージ × " + s.Shots + "回" + (s.Target == TargetType.All ? "（敵全員）" : "（" + (t != null ? t.Name : "-") + "）");
+            float eff = Battle.Effectiveness(s, t);
+            previewText.text = "見込み：1発 " + dmg + " ダメージ × " + s.Shots + "回" + (s.Target == TargetType.All ? "（敵全員）" : "（" + (t != null ? t.Name : "-") + "）")
+                + (eff > 1.01f ? "　<color=#d08000>弱点をつける！</color>" : eff < 0.99f ? "　<color=#7a80a0>効きにくい…</color>" : "");
+            previewText.supportRichText = true;
         }
         else previewText.text = msg;
         if (!keepMessage) programMessage.text = "";
@@ -846,8 +851,36 @@ public partial class MagicGame : MonoBehaviour
         RefreshBattle();
     }
 
+    // 敵の弱点・耐性・特性を 2 行で
+    static string VirusTraits(Unit u)
+    {
+        return "<color=#ffd84a>弱点 " + Elements(u.Weak) + "</color>　<color=#a8b0c8>耐性 " + Elements(u.Resist) + "</color>\n"
+             + "<color=#ff8ae0>特性 " + Unit.AbilityName(u.Ability) + "</color>";
+    }
+
+    static string Elements(Element[] es)
+    {
+        if (es == null || es.Length == 0) return "なし";
+        var parts = new List<string>();
+        foreach (var e in es) parts.Add(Blocks.Label(BlockKind.Element, (int)e));
+        return string.Join("・", parts);
+    }
+
     void ShowPopup(Hit h, Vector3 worldPos)
     {
+        if (h.Weak || h.Resist)
+        {
+            // 弱点をついた／効きにくかった
+            var tag = MakeText(effects, h.Weak ? "WEAK!" : "いまひとつ…", h.Weak ? 40 : 30, h.Weak ? UiKit.Hex("ffd84a") : UiKit.Hex("b8c0d8"), TextAnchor.MiddleCenter, true);
+            tag.fontStyle = FontStyle.BoldAndItalic;
+            AddOutline(tag, Color.black, 3f);
+            var trt = tag.rectTransform;
+            trt.anchorMin = trt.anchorMax = new Vector2(0.5f, 0.5f);
+            trt.sizeDelta = new Vector2(300, 60);
+            trt.position = worldPos;
+            trt.anchoredPosition += new Vector2(0, 60);
+            StartCoroutine(Popup(trt, tag));
+        }
         var t = MakeText(effects, (h.Heal ? "+" : "") + h.Amount, 56, h.Heal ? UiKit.Hex("7dff8a") : Color.white, TextAnchor.MiddleCenter, true);
         AddOutline(t, h.Heal ? UiKit.Hex("1a6a2a") : UiKit.Hex("c0103a"), 3f);
         var rt = t.rectTransform;
@@ -1587,8 +1620,10 @@ public partial class MagicGame : MonoBehaviour
             Fill(v.HpFill.rectTransform);
             v.HpFill.type = Image.Type.Filled;
             v.HpFill.fillMethod = Image.FillMethod.Horizontal;
-            var weak = MakeText(v.HpBox, u.HasWeakness ? "弱点 " + Blocks.Label(BlockKind.Element, (int)u.Weakness) : "弱点なし", 20, Color.white, TextAnchor.MiddleCenter, true);
-            Anchor(weak.rectTransform, 0, 1, 1, 1, 0, 0, 0, 26);
+            // 弱点・耐性・特性（頭の上）
+            var weak = MakeText(v.HpBox, VirusTraits(u), 20, Color.white, TextAnchor.LowerCenter, true);
+            weak.supportRichText = true;
+            Anchor(weak.rectTransform, -0.4f, 1, 1.4f, 1, 0, 0, 0, 56);
             AddOutline(weak, Color.black, 2f);
         }
         return v;

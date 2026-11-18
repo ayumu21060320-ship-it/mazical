@@ -2,7 +2,8 @@
 // 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
 //
 //   オープニング:   机の上のパソコンを 3D で映して画面に寄り、デスクトップへ（MagicGame.Intro.cs）
-//   タイトル画面:   ロゴと3人。「スタート」で依頼一覧へ
+//   タイトル画面:   ロゴと3人。「スタート」でホームへ
+//   ホーム:         依頼・キャラクター・ブロック図鑑・遊び方（MagicGame.Home.cs）
 //   依頼一覧:       どのパソコン（依頼）を助けに行くか選ぶと戦闘へ
 //   戦闘画面:       味方（左）とウイルス（右）が舞台に立つ。味方をクリックで選び、右のコマンドから
 //                   「プログラム」で魔法を組む。「バトル開始」でタイムラインが進み、右端に着いたキャラから行動する
@@ -49,7 +50,7 @@ public partial class MagicGame : MonoBehaviour
         if (FindAnyObjectByType<MagicGame>() == null) new GameObject("MagicGame").AddComponent<MagicGame>();
     }
 
-    enum Phase { Desktop, Title, Requests, Planning, Running, Finished }
+    enum Phase { Desktop, Title, Home, Requests, Planning, Running, Finished }
 
     Battle battle;
     Request currentRequest = Requests.All[0];
@@ -141,9 +142,13 @@ public partial class MagicGame : MonoBehaviour
         BuildTitle();
         BuildBattle();
         BuildRequests();
+        BuildHome();
+        BuildCharacters();
+        BuildBlockBook();
         BuildDesktop();
         effects = Layer("Effects");
         BuildProgramScreen();
+        BuildHowTo();
         BuildNoise();
         StartIntro();   // 3D のパソコン → デスクトップ → タイトル（MagicGame.Intro.cs）
     }
@@ -155,10 +160,8 @@ public partial class MagicGame : MonoBehaviour
         StopAllCoroutines();
         phase = Phase.Title;
         desktopLayer.gameObject.SetActive(false);
-        requestLayer.gameObject.SetActive(false);
+        HideScreens();
         titleLayer.gameObject.SetActive(true);
-        battleLayer.gameObject.SetActive(false);
-        programScreen.SetActive(false);
         ClearChildren(effects);
         if (withNoise) StartCoroutine(Noise(0.4f, 0.5f));
     }
@@ -166,7 +169,7 @@ public partial class MagicGame : MonoBehaviour
     void OnTitleStart()
     {
         if (phase != Phase.Title) return;
-        ShowRequests();
+        ShowHome();
     }
 
     // 依頼一覧へ
@@ -178,9 +181,7 @@ public partial class MagicGame : MonoBehaviour
         connecting = false;
         var old = requestLayer.Find("Connect");
         if (old != null) Destroy(old.gameObject);
-        titleLayer.gameObject.SetActive(false);
-        battleLayer.gameObject.SetActive(false);
-        programScreen.SetActive(false);
+        HideScreens();
         requestLayer.gameObject.SetActive(true);
         RebuildRequestCards();
         StartCoroutine(Noise(0.3f, 0.4f));
@@ -193,142 +194,6 @@ public partial class MagicGame : MonoBehaviour
         if (phase != Phase.Requests || connecting) return;
         currentRequest = r;
         StartCoroutine(Connect(r));
-    }
-
-    // 依頼主のパソコンにリモートでつなぐ。つながったらウイルスを探して、見つけたら戦闘へ
-    IEnumerator Connect(Request r)
-    {
-        connecting = true;
-        var screen = Img(requestLayer, null, UiKit.Hex("0c0a22"));
-        screen.raycastTarget = true;
-        var sc = screen.rectTransform;
-        sc.name = "Connect";
-        Fill(sc);
-        var grid = NewRect(sc, "Grid").gameObject.AddComponent<RawImage>();
-        Fill(grid.rectTransform);
-        grid.texture = CircuitTexture();
-        grid.uvRect = new Rect(0, 0, 1920f / 96f, 1080f / 96f);
-        grid.color = new Color(1, 1, 1, 0.35f);
-        grid.raycastTarget = false;
-
-        var head = MakeText(sc, "リモート接続", 48, Cyan, TextAnchor.MiddleCenter, true);
-        Anchor(head.rectTransform, 0, 0.84f, 1, 0.95f);
-        AddOutline(head, UiKit.Hex("0a3a48"), 3f);
-
-        // あなたのパソコン と 依頼主のパソコン
-        var mine = RemotePc(sc, new Vector2(0.24f, 0.56f), "あなたのPC", UiKit.Hex("4fb8ff"));
-        var theirs = RemotePc(sc, new Vector2(0.76f, 0.56f), r.Client + "さんのPC", UiKit.Hex("8a8fa0"));
-        var hat = Img(mine.screen.rectTransform, UiKit.Art("hat"), Color.white);
-        hat.preserveAspect = true;
-        Anchor(hat.rectTransform, 0.2f, 0.15f, 0.8f, 0.85f);
-        // 2台をつなぐ点線
-        var line = NewRect(sc, "Line");
-        Anchor(line, 0.35f, 0.56f, 0.65f, 0.56f, 0, -2, 0, 2);
-        for (int i = 0; i < 20; i++)
-        {
-            var d = Img(line, null, new Color(1, 1, 1, 0.35f)).rectTransform;
-            Anchor(d, i / 20f, 0, i / 20f + 0.025f, 1);
-        }
-
-        var status = MakeText(sc, "", 34, Color.white, TextAnchor.MiddleCenter, true);
-        Anchor(status.rectTransform, 0, 0.3f, 1, 0.37f);
-        var barBack = Img(sc, UiKit.RoundRect(12), new Color(1, 1, 1, 0.15f));
-        barBack.type = Image.Type.Sliced;
-        Anchor(barBack.rectTransform, 0.3f, 0.25f, 0.7f, 0.275f);
-        var fill = Img(barBack.rectTransform, UiKit.RoundRect(12), Cyan);
-        fill.type = Image.Type.Filled;
-        fill.fillMethod = Image.FillMethod.Horizontal;
-        Fill(fill.rectTransform);
-        var term = MakeText(sc, "", 22, UiKit.Hex("5ee05a"), TextAnchor.UpperLeft, false);
-        Anchor(term.rectTransform, 0.2f, 0.03f, 0.8f, 0.22f);
-
-        string host = r.Id + "-pc";
-        var steps = new[]
-        {
-            ("接続先を探しています", "> connect " + host),
-            ("認証しています", "> auth magical-compile ... OK"),
-            ("リモート接続しました", "> session open : " + r.Client + "さんのPC"),
-            ("ウイルスをスキャンしています", "> scan --all"),
-        };
-        var log = new System.Text.StringBuilder();
-        float packet = 0f;
-        for (int i = 0; i < steps.Length; i++)
-        {
-            log.AppendLine(steps[i].Item2);
-            term.text = log.ToString();
-            float dur = i == 3 ? 1.2f : 0.8f;
-            for (float t = 0f; t < dur; t += Time.deltaTime)
-            {
-                status.text = steps[i].Item1 + new string('.', (int)(t * 4f) % 4);
-                fill.fillAmount = (i + t / dur) / steps.Length;
-                packet -= Time.deltaTime;
-                if (packet <= 0f && i >= 1)   // データが行き来する
-                {
-                    packet = 0.12f;
-                    StartCoroutine(Packet(line, Random.value < 0.6f, i == 3 ? Magenta : Cyan));
-                }
-                if (i == 2) theirs.screen.color = Color.Lerp(UiKit.Hex("8a8fa0"), UiKit.Hex("4fb8ff"), t / dur);
-                yield return null;
-            }
-        }
-        fill.fillAmount = 1f;
-
-        // ウイルス発見：相手の画面が赤くなり、ウイルスが映る
-        theirs.screen.color = UiKit.Hex("b0102e");
-        for (int k = 0; k < r.Enemies.Length; k++)
-        {
-            var v = Img(theirs.screen.rectTransform, UiKit.Art(r.Enemies[k].Art), Color.white);
-            v.preserveAspect = true;
-            float w = 1f / r.Enemies.Length;
-            Anchor(v.rectTransform, k * w + 0.03f, 0.15f, (k + 1) * w - 0.03f, 0.85f);
-        }
-        status.text = "ウイルスを " + r.Enemies.Length + " 件検出！";
-        status.color = Magenta;
-        log.AppendLine("> WARNING : virus x" + r.Enemies.Length);
-        term.text = log.ToString();
-        StartCoroutine(Noise(0.4f, 0.5f));
-        yield return new WaitForSeconds(1.0f);
-
-        Destroy(screen.gameObject);
-        connecting = false;
-        requestLayer.gameObject.SetActive(false);
-        battleLayer.gameObject.SetActive(true);
-        NewBattle();
-    }
-
-    (RectTransform root, Image screen) RemotePc(RectTransform parent, Vector2 at, string label, Color screenColor)
-    {
-        var root = NewRect(parent, "Pc");
-        root.anchorMin = root.anchorMax = at;
-        root.sizeDelta = new Vector2(360, 300);
-        var frame = Img(root, UiKit.RoundRect(14), UiKit.Hex("2b2b33"));
-        frame.type = Image.Type.Sliced;
-        Anchor(frame.rectTransform, 0, 0.3f, 1, 1);
-        var screen = Img(frame.rectTransform, null, screenColor);
-        Anchor(screen.rectTransform, 0, 0, 1, 1, 12, 12, -12, -12);
-        var stand = Img(root, null, UiKit.Hex("2b2b33"));
-        Anchor(stand.rectTransform, 0.44f, 0.18f, 0.56f, 0.3f);
-        var foot = Img(root, null, UiKit.Hex("2b2b33"));
-        Anchor(foot.rectTransform, 0.3f, 0.14f, 0.7f, 0.18f);
-        var t = MakeText(root, label, 28, Color.white, TextAnchor.MiddleCenter, true);
-        Anchor(t.rectTransform, 0, 0, 1, 0.13f);
-        return (root, screen);
-    }
-
-    // 線の上を小さな四角が流れる（toRight = あなた → 相手）
-    IEnumerator Packet(RectTransform line, bool toRight, Color color)
-    {
-        var p = Img(line, null, color).rectTransform;
-        p.anchorMin = p.anchorMax = new Vector2(toRight ? 0f : 1f, 0.5f);
-        p.sizeDelta = new Vector2(14, 14);
-        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.5f)
-        {
-            if (p == null) yield break;
-            float x = toRight ? t : 1f - t;
-            p.anchorMin = p.anchorMax = new Vector2(x, 0.5f);
-            yield return null;
-        }
-        if (p != null) Destroy(p.gameObject);
     }
 
     static bool IsCleared(Request r) => PlayerPrefs.GetInt("clear_" + r.Id, 0) == 1;
@@ -1726,7 +1591,7 @@ public partial class MagicGame : MonoBehaviour
         requestCards = NewRect(requestLayer, "Cards");
         Anchor(requestCards, 0.03f, 0.14f, 0.97f, 0.85f);
 
-        var back = CommandButton(requestLayer, "タイトルへ", 32, ShowTitle, false);
+        var back = CommandButton(requestLayer, "ホームへ", 32, ShowHome, false);
         Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
         requestLayer.gameObject.SetActive(false);
     }

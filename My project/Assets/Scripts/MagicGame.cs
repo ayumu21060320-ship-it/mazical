@@ -12,7 +12,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 using MagicBattle;
 
@@ -728,7 +727,11 @@ public class MagicGame : MonoBehaviour
         {
             var es = new GameObject("EventSystem");
             es.AddComponent<EventSystem>();
-            es.AddComponent<InputSystemUIInputModule>();
+            // Input System のパッケージが入っていればそれを使い、無ければ標準の入力を使う
+            // （パッケージが無くてもコンパイルできるよう、名前で探す）
+            var inputModule = System.Type.GetType("UnityEngine.InputSystem.UI.InputSystemUIInputModule, Unity.InputSystem");
+            if (inputModule != null) es.AddComponent(inputModule);
+            else es.AddComponent<StandaloneInputModule>();
         }
 
         var canvasGo = new GameObject("UI");

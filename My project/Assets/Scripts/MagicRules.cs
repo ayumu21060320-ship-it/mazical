@@ -31,8 +31,9 @@ namespace MagicBattle
     {
         public BlockKind Kind;
         public int Value;
+        public bool WithElse;   // 手持ちの「もし〜なら〜でなければ」（置くと「でなければ」もいっしょに入る）
         public Block(BlockKind kind, int value = 0) { Kind = kind; Value = value; }
-        public Block Clone() => new Block(Kind, Value);
+        public Block Clone() => new Block(Kind, Value) { WithElse = WithElse };
     }
 
     public static class Blocks

@@ -12,7 +12,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+#if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem.UI;
+#endif
 using UnityEngine.UI;
 using MagicBattle;
 
@@ -728,7 +730,12 @@ public class MagicGame : MonoBehaviour
         {
             var es = new GameObject("EventSystem");
             es.AddComponent<EventSystem>();
+            // Unity の設定（Active Input Handling）が新旧どちらでもクリックできるようにする
+#if ENABLE_INPUT_SYSTEM
             es.AddComponent<InputSystemUIInputModule>();
+#else
+            es.AddComponent<StandaloneInputModule>();
+#endif
         }
 
         var canvasGo = new GameObject("UI");

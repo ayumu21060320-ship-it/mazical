@@ -148,6 +148,8 @@ public partial class MagicGame : MonoBehaviour
         BuildCharacters();
         BuildBlockBook();
         BuildVirusBook();
+        BuildMailbox();
+        EnsureWelcomeMail();
         BuildDesktop();
         effects = Layer("Effects");
         BuildProgramScreen();
@@ -205,11 +207,13 @@ public partial class MagicGame : MonoBehaviour
     {
         StopAllCoroutines();
         ClearChildren(effects);
+        var call = battleLayer.Find("Call");   // 前の依頼完了の通信が残っていたら消す
+        if (call != null) Destroy(call.gameObject);
         for (int i = noiseLayer.childCount - 1; i >= 2; i--) Destroy(noiseLayer.GetChild(i).gameObject); // 走査線と砂嵐は残す
         noise.color = new Color(1, 1, 1, 0);
         busy = false;
         flying = 0;
-        battle = new Battle(System.Environment.TickCount, currentRequest);
+        battle = new Battle(System.Environment.TickCount, currentRequest, LevelMap(), MemoryBonus);
         drafts.Clear();
         linkDrafts.Clear();
         int carried = 0;
@@ -741,8 +745,8 @@ public partial class MagicGame : MonoBehaviour
         {
             phase = Phase.Finished;
             AddLog(battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…");
-            if (battle.Won) { PlayerPrefs.SetInt("clear_" + currentRequest.Id, 1); PlayerPrefs.Save(); }
-            StartCoroutine(ShowResult(battle.Won));
+            if (battle.Won) StartCoroutine(Victory());   // 依頼完了の通信（MagicGame.Progress.cs）
+            else StartCoroutine(ShowResult(false));
         }
         RefreshBattle();
     }

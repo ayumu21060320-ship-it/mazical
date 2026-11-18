@@ -263,6 +263,7 @@ namespace MagicBattle
         public Unit LinkPartner;  // リンクプログラムで組んだ相手（魔法を打つ側が持つ）
         public Unit LinkedTo;     // リンクの相手に選ばれた（このターンは魔法を打たない）
 
+        public int Level = 1;
         public bool LockPending;  // ロックされた（次のターンにメモリ容量が減る）
         public bool Locked;       // このターンはメモリ容量が減っている
 
@@ -383,9 +384,32 @@ namespace MagicBattle
         public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Troy, Rootkit };
     }
 
+    // レベル：経験値（EXP）がたまると上がる。Lv が 1 上がるごとにメモリ容量 +100・HP +20
+    public static class Levels
+    {
+        public const int MemoryPerLevel = 100, HpPerLevel = 20;
+
+        // 次のレベルまでに要る経験値（Lv1→2 は 100、Lv2→3 は 200 …）
+        public static int Need(int level) => 100 * level;
+
+        // 経験値の合計から、レベルと、いまのレベルでたまった分・次までに要る分
+        public static int LevelOf(int xp, out int into, out int need)
+        {
+            int lv = 1;
+            need = Need(lv);
+            while (xp >= need) { xp -= need; lv++; need = Need(lv); }
+            into = xp;
+            return lv;
+        }
+
+        public static int LevelOf(int xp) => LevelOf(xp, out _, out _);
+    }
+
     public class Request
     {
         public string Id, Client, Title, Message;
+        public string Thanks;        // 駆除したあとのお礼の言葉
+        public int Xp = 100;         // もらえる経験値（2回目からは半分）
         public int Stars;            // むずかしさ（★の数）
         public EnemySpec[] Enemies;  // 最初に出てくるウイルス
         public EnemySpec[][] Waves;  // 強敵戦：倒すと次のウイルスが出てくる（null ならふつうの依頼）
@@ -405,31 +429,36 @@ namespace MagicBattle
         {
             new Request
             {
-                Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1,
+                Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1, Xp = 80,
+                Thanks = "文字が元にもどった！ これで宿題が出せるよ。ほんとうにありがとう！",
                 Message = "明日出す宿題のファイルを開いたら、文字がめちゃくちゃに…。虫みたいなのが画面をはってる！",
                 Enemies = new[] { Bug(250), Bug(250) },
             },
             new Request
             {
-                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2,
+                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2, Xp = 150,
+                Thanks = "旅行の写真、ぜんぶ無事だった！ にょろにょろもいなくなったよ、ありがとう！",
                 Message = "旅行の写真がどんどんコピーされて、パソコンがパンパン！ 紫のにょろにょろが増えてるの",
                 Enemies = new[] { Worm(350), Spam(), Worm(350) },
             },
             new Request
             {
-                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2,
+                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2, Xp = 150,
+                Thanks = "セーブデータのカギが外れた！ 100時間のデータが助かったよ、神！",
                 Message = "セーブデータを開こうとしたら「返してほしければ…」って出てきた！ 金色のカギのやつが2体いる",
                 Enemies = new[] { Ransom(450), Spam(200), Ransom(450) },
             },
             new Request
             {
-                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3,
+                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3, Xp = 250,
+                Thanks = "成績データがもどりました。たいへん助かりました。きみたちは学校の救世主ですね",
                 Message = "職員室のパソコンに大きな一つ目のウイルスが…。成績のデータを人質にとられています。至急たのみます",
                 Enemies = new[] { Bug(), Worm(), Troy() },
             },
             new Request
             {
-                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3,
+                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3, Xp = 400,
+                Thanks = "親玉まで倒してくれたのか…！ 店のパソコンがぜんぶ動いてる。きみたちは本物だ！",
                 Message = "店じゅうのパソコンがウイルスの巣に…！ 倒しても倒しても奥から出てくる。いちばん奥に親玉がいるはずだ",
                 Enemies = new[] { Bug(), Spam(), Bug() },
                 Waves = new[]
@@ -455,21 +484,26 @@ namespace MagicBattle
         public const float ChargeMemory = 1.3f, ChargePower = 1.3f;
         readonly Random rng;
 
-        public Battle(int seed) : this(seed, Requests.All[Requests.All.Length - 1]) { }
+        public Battle(int seed) : this(seed, Requests.All[0]) { }
 
         public int Wave;           // いまのウェーブ（0 から）
         public int WaveCount = 1;
         EnemySpec[][] waves;
 
-        public Battle(int seed, Request request)
+        public Battle(int seed, Request request) : this(seed, request, null, 0) { }
+
+        // levels：キャラ（Art）ごとのレベル。memoryBonus：メモリ増設チップで増えたメモリ容量
+        public Battle(int seed, Request request, Dictionary<string, int> levels, int memoryBonus)
         {
             rng = new Random(seed);
             waves = request.Waves ?? new[] { request.Enemies };
             WaveCount = waves.Length;
             foreach (var c in Characters.All)
             {
-                var a = Ally(c.Name, c.Short, c.Art, c.Trait, c.Capacity);
-                a.MaxHp = a.Hp = c.Hp;
+                int lv = levels != null && levels.TryGetValue(c.Art, out var l) ? l : 1;
+                var a = Ally(c.Name, c.Short, c.Art, c.Trait, c.Capacity + (lv - 1) * Levels.MemoryPerLevel + memoryBonus);
+                a.MaxHp = a.Hp = c.Hp + (lv - 1) * Levels.HpPerLevel;
+                a.Level = lv;
                 Allies.Add(a);
             }
             // 敵は依頼主のパソコンに入りこんだウイルス

@@ -203,5 +203,18 @@ public static class ArtData
             "vnYbB6ebKjhDpqts5QRuwQfe4aHKs+1OHY1WBeu+MI7SETAvHv5QyrUMlbCT0P6VANhybdDbG63KmFdpgwWAci0DJihKyr1b79VFAHALPio8PMn0/ffWeNKF" +
             "A7uoNrWHb7fgG0vGQcayuqHINEeSaxRuNLwuESeZl8Okm1XWSEkjlrEq/CsBCDYRR+nI7LK2aNMgQzip0bPU0fpKw1oLuD2yWrKu2jz+ARE2So3QhgrfAAAA" +
             "AElFTkSuQmCC" },
+        { "ransom",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABYElEQVR42u1WsZKCMBDdMBlbZyws+YBzBu9aK63vFygYSzsorR1K7SxvLPgPqaiFGbn6qGht" +
+            "bbDKXUBINihHCrcD8vJedvOWBXhFz0FUAW+mVYi+p1lCOhHAiB3XE6477LZKQgiWXEZcJwQjwsCSs5NhyR3Xk5arlAG2mFfNk7MMyITw6xhWlAnKiMZJDMf5" +
+            "AiZgFVUAv6ksrYfdtnBcD7Ala8xAte7YmqpiaVv7PCuMvhuRoWUnrGs6KjasXl5RgyJ15NH+2tmJZ6tBSQRtWjh8Xz6d/HL60u8OUJHa2Wpw9x5THhUcFW0U" +
+            "7a8w/PwG+Fj8CYNcKuD8E5cxm/wBG3IboUOC4X9S/34HzqMRjJP4V8RDNuRrrYphVuzFBXwf0NOGYZSjwL4NsA5M8O0MwghLad67ADM6dZYBNg2BNS2wM8E6" +
+            "MBuffTtTE5BmCVEhb0MinQf6mob0H0i67gFaxA35N7TgLQBoXgAAAABJRU5ErkJggg==" },
+        { "spam",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABq0lEQVR42u2XPWvCQBjH/wl27yB9WaRDpyi5RZyKiFPJUJwUOvsJ+gEy5AP4CTIXXTuETiU4" +
+            "hi4XaqYO4tJaHKRroddBLuTyXt/i4B8y3CW53/+e57nLBTjqEKVUVFYovLVkrHATxzrYlySlojJv5kr7Cn+YJQ2njBlNAm/mSkpFZY8PBkirsRM4tR3cD3Sf" +
+            "pY8pZADQx9SfOWk1QG1nJ3A+MQ4HsDLATXBt20QQHmZJwykTct5bfiS+uA346PRSuC8bTSK+cV32L9LXQG0H804X1btb4bG4vlh4XxPGDMpoEsjezJUiJgIi" +
+            "fQ3t3+9If1xfLDxBvPCFJaGPKXrln/gBTSt3OtLgo8WJDwcAKbwFT7zX5IFzmJh3ukL7/O1FaFeVurAXyP8pKF4TeeAcPK+1U8csZUGrSj3aORCbk6fnyMwF" +
+            "Y7V2JBK5DSSlhJrWKs/vC1DbwcWay1Red32TvgZqWpnVnqXSJptMGjgr9xtHIKxwjoPtpPxv1UAYxCOQBt84BXkikbsG+OeYmtZ+T0QcfuZSfKlk58DgLljY" +
+            "SbjwI//n1c3xv+Nw9AcRLsbCX3rZpAAAAABJRU5ErkJggg==" },
     };
 }

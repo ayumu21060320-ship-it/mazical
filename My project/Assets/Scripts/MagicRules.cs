@@ -16,6 +16,14 @@ namespace MagicBattle
     public enum Effect { Blast, Heal, Slow }
     public enum Trait { FireUp, IceUp, MemoryUp }
 
+    // ウイルスの特性
+    //   Regen:      増殖。ターンの終わりに HP が 15% 回復する
+    //   AllAttack:  一斉送信。味方全員を攻撃する（1人あたりは弱め）
+    //   Lock:       ロック。攻撃した味方の次のターンのメモリ容量を 30% 減らす
+    //   Scatter:    分散。「1体」の魔法は半分しか効かないが、「全体」の魔法は 1.5 倍効く
+    //   Firewall:   ファイアウォール。属性の無い魔法（無）以外は効きにくい（炎・氷に耐性）
+    public enum VirusAbility { None, Regen, AllAttack, Lock, Scatter, Firewall }
+
     // 並べたブロック 1 つ。Value は選んでいる選択肢の番号
     public class Block
     {
@@ -255,10 +263,40 @@ namespace MagicBattle
         public Unit LinkPartner;  // リンクプログラムで組んだ相手（魔法を打つ側が持つ）
         public Unit LinkedTo;     // リンクの相手に選ばれた（このターンは魔法を打たない）
 
+        public bool LockPending;  // ロックされた（次のターンにメモリ容量が減る）
+        public bool Locked;       // このターンはメモリ容量が減っている
+
         // 敵だけ
-        public bool HasWeakness;
-        public Element Weakness;
+        public Element[] Weak = new Element[0];     // 弱点（1.5 倍）
+        public Element[] Resist = new Element[0];   // 耐性（0.5 倍）
+        public VirusAbility Ability;
         public int Attack;
+
+        public static string AbilityName(VirusAbility a)
+        {
+            switch (a)
+            {
+                case VirusAbility.Regen: return "増殖";
+                case VirusAbility.AllAttack: return "一斉送信";
+                case VirusAbility.Lock: return "ロック";
+                case VirusAbility.Scatter: return "分散";
+                case VirusAbility.Firewall: return "ファイアウォール";
+                default: return "なし";
+            }
+        }
+
+        public static string AbilityText(VirusAbility a)
+        {
+            switch (a)
+            {
+                case VirusAbility.Regen: return "ターンの終わりに HP が 15% 回復する";
+                case VirusAbility.AllAttack: return "味方全員を攻撃する（1人あたりは弱め）";
+                case VirusAbility.Lock: return "攻撃した味方の、次のターンのメモリ容量を 30% 減らす";
+                case VirusAbility.Scatter: return "「1体」の魔法は半分しか効かない。「全体」の魔法は 1.5 倍効く";
+                case VirusAbility.Firewall: return "炎も氷も効きにくい。属性「無」の魔法でこわそう";
+                default: return "特別な力は無い";
+            }
+        }
 
         public bool Alive => Hp > 0;
 
@@ -278,6 +316,7 @@ namespace MagicBattle
         public Unit Target;
         public int Amount;
         public bool Heal;
+        public bool Weak, Resist;   // 弱点をついた／効きにくかった
     }
 
     public class ActionResult
@@ -314,10 +353,32 @@ namespace MagicBattle
         public string Name, Short, Art;
         public int Hp, Attack;
         public float Speed;
-        public bool HasWeakness;
-        public Element Weakness;
-        public EnemySpec(string name, string sh, string art, int hp, int atk, float speed, bool weak, Element w)
-        { Name = name; Short = sh; Art = art; Hp = hp; Attack = atk; Speed = speed; HasWeakness = weak; Weakness = w; }
+        public Element[] Weak, Resist;
+        public VirusAbility Ability;
+        public string Description;
+        public EnemySpec(string name, string sh, string art, int hp, int atk, float speed, Element[] weak, Element[] resist, VirusAbility ability, string desc)
+        {
+            Name = name; Short = sh; Art = art; Hp = hp; Attack = atk; Speed = speed;
+            Weak = weak; Resist = resist; Ability = ability; Description = desc;
+        }
+        public EnemySpec WithHp(int hp) => new EnemySpec(Name, Short, Art, hp, Attack, Speed, Weak, Resist, Ability, Description);
+    }
+
+    // ウイルスの種類（ウイルス図鑑と依頼で使う）
+    public static class Viruses
+    {
+        static Element[] E(params Element[] e) => e;
+        public static readonly EnemySpec Bug = new EnemySpec("バグ", "バ", "bug", 400, 35, 30f, E(Element.Fire), E(Element.Ice), VirusAbility.None,
+            "いちばんよく見るウイルス。プログラムをかじって、文字をめちゃくちゃにする");
+        public static readonly EnemySpec Worm = new EnemySpec("ワーム", "ワ", "worm", 400, 35, 32f, E(Element.Ice), E(Element.Fire), VirusAbility.Regen,
+            "ファイルを勝手にコピーして増えていく。早めに倒さないと回復してしまう");
+        public static readonly EnemySpec Spam = new EnemySpec("スパム", "ス", "spam", 220, 25, 44f, E(Element.Fire), E(), VirusAbility.Scatter,
+            "迷惑メールのウイルス。すばしっこくて、まとめて攻撃しないと効きにくい");
+        public static readonly EnemySpec Ransom = new EnemySpec("ランサム", "ラ", "ransom", 500, 40, 26f, E(Element.Ice), E(Element.Fire), VirusAbility.Lock,
+            "データにカギをかけて人質にする。攻撃された味方はメモリが減ってしまう");
+        public static readonly EnemySpec Troy = new EnemySpec("トロイ", "ト", "troy", 700, 45, 22f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.AllAttack,
+            "安全なプログラムのふりをして入りこむ大物。炎も氷も効きにくく、全員を攻撃してくる");
+        public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Troy };
     }
 
     public class Request
@@ -329,9 +390,11 @@ namespace MagicBattle
 
     public static class Requests
     {
-        static EnemySpec Bug(int hp = 400) => new EnemySpec("バグ", "バ", "bug", hp, 35, 30f, true, Element.Fire);
-        static EnemySpec Worm(int hp = 400) => new EnemySpec("ワーム", "ワ", "worm", hp, 35, 32f, true, Element.Ice);
-        static EnemySpec Troy(int hp = 700) => new EnemySpec("トロイ", "ト", "troy", hp, 60, 22f, false, Element.None);
+        static EnemySpec Bug(int hp = 400) => Viruses.Bug.WithHp(hp);
+        static EnemySpec Worm(int hp = 400) => Viruses.Worm.WithHp(hp);
+        static EnemySpec Spam(int hp = 220) => Viruses.Spam.WithHp(hp);
+        static EnemySpec Ransom(int hp = 500) => Viruses.Ransom.WithHp(hp);
+        static EnemySpec Troy(int hp = 700) => Viruses.Troy.WithHp(hp);
 
         public static readonly Request[] All =
         {
@@ -345,7 +408,13 @@ namespace MagicBattle
             {
                 Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2,
                 Message = "旅行の写真がどんどんコピーされて、パソコンがパンパン！ 紫のにょろにょろが増えてるの",
-                Enemies = new[] { Worm(350), Bug(300), Worm(350) },
+                Enemies = new[] { Worm(350), Spam(), Worm(350) },
+            },
+            new Request
+            {
+                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2,
+                Message = "セーブデータを開こうとしたら「返してほしければ…」って出てきた！ 金色のカギのやつが2体いる",
+                Enemies = new[] { Ransom(450), Spam(200), Ransom(450) },
             },
             new Request
             {
@@ -382,7 +451,11 @@ namespace MagicBattle
             }
             // 敵は依頼主のパソコンに入りこんだウイルス
             foreach (var e in request.Enemies)
-                Enemies.Add(Enemy(e.Name, e.Short, e.Art, e.Hp, e.Attack, e.Speed, e.HasWeakness, e.Weakness));
+                Enemies.Add(new Unit
+                {
+                    Name = e.Name, Short = e.Short, Art = e.Art, IsAlly = false, MaxHp = e.Hp, Hp = e.Hp, Attack = e.Attack, Speed = e.Speed,
+                    Weak = e.Weak, Resist = e.Resist, Ability = e.Ability,
+                });
         }
 
         static Unit Ally(string name, string sh, string art, Trait t, int cap) => new Unit
@@ -390,11 +463,6 @@ namespace MagicBattle
             Name = name, Short = sh, Art = art, IsAlly = true, MaxHp = 300, Hp = 300, Trait = t, Capacity = cap, Speed = NoProgramSpeed,
         };
 
-        static Unit Enemy(string name, string sh, string art, int hp, int atk, float speed, bool weak, Element w) => new Unit
-        {
-            Name = name, Short = sh, Art = art, IsAlly = false, MaxHp = hp, Hp = hp, Attack = atk, Speed = speed,
-            HasWeakness = weak, Weakness = w,
-        };
 
         public IEnumerable<Unit> All()
         {
@@ -403,7 +471,7 @@ namespace MagicBattle
         }
 
         // チャージしていればメモリ容量が増える
-        public int CapacityOf(Unit u) => (int)(u.Capacity * (u.Charged ? ChargeMemory : 1f));
+        public int CapacityOf(Unit u) => (int)(u.Capacity * (u.Charged ? ChargeMemory : 1f) * (u.Locked ? 0.7f : 1f));
 
         // リンクプログラムのメモリ容量（2人分）
         public int LinkCapacity(Unit main, Unit partner) => CapacityOf(main) + CapacityOf(partner);
@@ -510,6 +578,21 @@ namespace MagicBattle
                     if (a.Spell != null && a.Spell.IsLink) { a.Spell = null; notes.Add(a.Name + "のリンクプログラムが終わった"); }
                 }
             }
+            foreach (var e in Enemies)
+            {
+                if (e.Alive && e.Ability == VirusAbility.Regen && e.Hp < e.MaxHp)
+                {
+                    int h = Math.Min(e.MaxHp - e.Hp, (int)(e.MaxHp * 0.15f));
+                    e.Hp += h;
+                    notes.Add(e.Name + "が増殖して HP が " + h + " 回復した");
+                }
+            }
+            foreach (var a in Allies)
+            {
+                a.Locked = a.LockPending && a.Alive;
+                a.LockPending = false;
+                if (a.Locked) notes.Add(a.Name + "はロックされていて、このターンはメモリ容量が 30% 少ない");
+            }
             foreach (var a in Allies)
             {
                 a.Charged = a.Charging && a.Alive;
@@ -540,11 +623,25 @@ namespace MagicBattle
             bool fireUp = ally.Trait == Trait.FireUp || (s.Partner != null && s.Partner.Trait == Trait.FireUp);
             bool iceUp = ally.Trait == Trait.IceUp || (s.Partner != null && s.Partner.Trait == Trait.IceUp);
             if ((fireUp && s.Has(Element.Fire)) || (iceUp && s.Has(Element.Ice))) d *= 1.5f;   // 得意な属性（重ならない）
-            if (enemy != null && enemy.HasWeakness && s.Has(enemy.Weakness)) d *= 1.5f;
+            d *= Effectiveness(s, enemy);
             if (s.HasEffect && s.Effect == Effect.Blast) d *= 1.3f;
             if (ally.Charged) d *= ChargePower;
             d *= s.LinkBonus;
             return Math.Max(1, (int)Math.Round(d));
+        }
+
+        // 相性：弱点 1.5 倍、耐性 0.5 倍（両方なら打ち消し）。分散の特性は「1体」0.5 倍・「全体」1.5 倍
+        public static float Effectiveness(Spell s, Unit enemy)
+        {
+            if (enemy == null) return 1f;
+            float k = 1f;
+            bool weak = false, resist = false;
+            foreach (var w in enemy.Weak) if (s.Has(w)) weak = true;
+            foreach (var r in enemy.Resist) if (s.Has(r)) resist = true;
+            if (weak && !resist) k *= 1.5f;
+            if (resist && !weak) k *= 0.5f;
+            if (enemy.Ability == VirusAbility.Scatter) k *= s.Target == TargetType.One ? 0.5f : 1.5f;
+            return k;
         }
 
         public ActionResult Act(Unit actor)
@@ -574,7 +671,8 @@ namespace MagicBattle
                     int d = Damage(a, s, e);
                     e.Hp = Math.Max(0, e.Hp - d);
                     total += d;
-                    r.Hits.Add(new Hit { Target = e, Amount = d });
+                    float eff = Effectiveness(s, e);
+                    r.Hits.Add(new Hit { Target = e, Amount = d, Weak = eff > 1.01f, Resist = eff < 0.99f });
                     if (s.HasEffect && s.Effect == Effect.Slow) e.Gauge = Math.Max(0f, e.Gauge - 30f);
                 }
             }
@@ -593,11 +691,29 @@ namespace MagicBattle
         {
             var alive = Allies.FindAll(x => x.Alive);
             if (alive.Count == 0) return;
+            if (e.Ability == VirusAbility.AllAttack)
+            {
+                int total = 0;
+                foreach (var a in alive)
+                {
+                    int dd = (int)(e.Attack * 0.6f) + rng.Next(0, 8);
+                    a.Hp = Math.Max(0, a.Hp - dd);
+                    total += dd;
+                    r.Hits.Add(new Hit { Target = a, Amount = dd });
+                }
+                r.Text = e.Name + "の一斉送信！ 味方全員に合計" + total + "ダメージ";
+                return;
+            }
             var t = alive[rng.Next(alive.Count)];
             int d = e.Attack + rng.Next(0, 11);
             t.Hp = Math.Max(0, t.Hp - d);
             r.Hits.Add(new Hit { Target = t, Amount = d });
             r.Text = e.Name + "の侵食！ " + t.Name + "に" + d + "ダメージ";
+            if (e.Ability == VirusAbility.Lock && t.Alive)
+            {
+                t.LockPending = true;
+                r.Text += "。" + t.Name + "のメモリにカギがかかった（次のターン 30% 減）";
+            }
         }
     }
 }

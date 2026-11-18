@@ -13,7 +13,7 @@ using MagicBattle;
 
 public partial class MagicGame
 {
-    RectTransform homeLayer, charLayer, bookLayer, howToLayer;
+    RectTransform homeLayer, charLayer, bookLayer, howToLayer, virusLayer;
     Text homeBadgeText;
     GameObject homeBadge;
     Text howToTitle, howToBody, howToPage;
@@ -29,6 +29,7 @@ public partial class MagicGame
         homeLayer.gameObject.SetActive(false);
         charLayer.gameObject.SetActive(false);
         bookLayer.gameObject.SetActive(false);
+        virusLayer.gameObject.SetActive(false);
         howToLayer.gameObject.SetActive(false);
         programScreen.SetActive(false);
     }
@@ -88,6 +89,7 @@ public partial class MagicGame
             ("依頼", "ウイルスに困っている人を助ける", ShowRequests),
             ("キャラクター", "AI ロボットの特性を見る", ShowCharacters),
             ("ブロック図鑑", "プログラムのブロックを調べる", ShowBlockBook),
+            ("ウイルス図鑑", "弱点・耐性・特性を調べる", ShowVirusBook),
             ("タイトルへ", "", ShowTitle),
         };
         for (int i = 0; i < items.Length; i++)
@@ -96,8 +98,9 @@ public partial class MagicGame
             bool main = i == 0;
             var b = CommandButton(homeLayer, it.label, main ? 56 : 46, it.act, main);
             var rt = (RectTransform)b.transform;
-            float top = 0.82f - i * 0.17f;
-            Anchor(rt, 0.56f + i * 0.015f, top - (i == 3 ? 0.09f : 0.13f), 0.95f, top);
+            bool last = i == items.Length - 1;
+            float top = 0.82f - i * 0.145f;
+            Anchor(rt, 0.56f + i * 0.012f, top - (last ? 0.08f : 0.115f), 0.95f, top);
             if (it.sub != "")
             {
                 var sub = MakeText(rt, it.sub, 22, main ? Color.white : UiKit.Hex("a8f4ff"), TextAnchor.LowerRight, false);
@@ -249,6 +252,62 @@ public partial class MagicGame
         bookLayer.gameObject.SetActive(true);
     }
 
+    // ================= ウイルス図鑑 =================
+
+    void BuildVirusBook()
+    {
+        virusLayer = MenuScreen("VirusBook", "ウイルス図鑑");
+        var list = NewRect(virusLayer, "List");
+        Anchor(list, 0.03f, 0.14f, 0.97f, 0.86f);
+        int n = Viruses.All.Length;
+        for (int i = 0; i < n; i++)
+        {
+            var v = Viruses.All[i];
+            var border = Img(list, UiKit.RoundRect(26), Magenta);
+            border.type = Image.Type.Sliced;
+            Anchor(border.rectTransform, i / (float)n + 0.005f, 0, (i + 1) / (float)n - 0.005f, 1);
+            var card = Img(border.rectTransform, UiKit.RoundRect(22), new Color(0.1f, 0.07f, 0.18f, 0.95f));
+            card.type = Image.Type.Sliced;
+            var c = card.rectTransform;
+            Anchor(c, 0, 0, 1, 1, 5, 5, -5, -5);
+            var art = Img(c, UiKit.Art(v.Art), Color.white);
+            art.preserveAspect = true;
+            Anchor(art.rectTransform, 0.15f, 0.66f, 0.85f, 0.97f);
+            ambient.StartCoroutine(Bob(art.rectTransform, i));
+            var name = MakeText(c, v.Name, 38, Magenta, TextAnchor.MiddleCenter, true);
+            Anchor(name.rectTransform, 0, 0.58f, 1, 0.66f);
+            var stats = MakeText(c,
+                "HP " + v.Hp + "　攻撃 " + v.Attack + "\n<color=#ffd84a>弱点 " + Elements(v.Weak) + "</color>\n<color=#a8b0c8>耐性 " + Elements(v.Resist) + "</color>",
+                23, Color.white, TextAnchor.UpperCenter, true);
+            stats.supportRichText = true;
+            Anchor(stats.rectTransform, 0.04f, 0.4f, 0.96f, 0.58f);
+            var ab = MakeText(c, "<color=#ff8ae0>特性：" + Unit.AbilityName(v.Ability) + "</color>\n" + Unit.AbilityText(v.Ability), 20, Color.white, TextAnchor.UpperLeft, true);
+            ab.supportRichText = true;
+            Anchor(ab.rectTransform, 0.07f, 0.2f, 0.93f, 0.4f);
+            var desc = MakeText(c, v.Description, 19, UiKit.Hex("c8c0e0"), TextAnchor.UpperLeft, false);
+            Anchor(desc.rectTransform, 0.07f, 0.02f, 0.93f, 0.2f);
+        }
+        var back = CommandButton(virusLayer, "ホームへ", 32, ShowHome, false);
+        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
+        var hint = MakeText(virusLayer, "弱点の属性は 1.5 倍、耐性の属性は 0.5 倍。特性に合わせてプログラムを組もう", 26, Ink, TextAnchor.MiddleLeft, true);
+        Anchor(hint.rectTransform, 0.23f, 0.03f, 0.97f, 0.11f);
+    }
+
+    IEnumerator Bob(RectTransform rt, int i)
+    {
+        while (true)
+        {
+            rt.anchoredPosition = new Vector2(0, Mathf.Sin(Time.time * 2f + i) * 8f);
+            yield return null;
+        }
+    }
+
+    void ShowVirusBook()
+    {
+        HideScreens();
+        virusLayer.gameObject.SetActive(true);
+    }
+
     // ================= 遊び方 =================
 
     static readonly (string title, string body, string picture)[] HowToPages =
@@ -261,6 +320,8 @@ public partial class MagicGame
          "ブロックはメモリを使う。メモリ容量をこえると送信できない。\nメモリをたくさん使うほど処理速度が遅くなり、行動が遅くなる。\n\n弱い魔法を何回も打つか、強い魔法をじっくり打つか、作戦を考えよう。", "memory"),
         ("タイムライン",
          "「バトル開始」でタイムラインが進む。右端に着いたキャラから行動する。\n全員が 1 回以上行動するとターンが終わり、またプログラムを組み直せる。\n\n速いキャラは、同じターンに 2 回行動できることもある。", "timeline"),
+        ("ウイルスの弱点・耐性・特性",
+         "ウイルスには弱点（1.5 倍効く属性）と耐性（0.5 倍しか効かない属性）がある。\n敵の頭の上や、ホームの「ウイルス図鑑」で確かめよう。\n\n増殖・ロック・分散などの特性もある。弱点をつくと「WEAK!」と出る。", "virus"),
         ("チャージとリンクプログラム",
          "チャージ：そのターンは魔法を打たず、次のターンのメモリと攻撃力が 1.3 倍。\n\nリンクプログラム（1 試合 2 回）：ペアを選んで 2 人分のメモリで魔法を組む。\n属性 2 つ・威力 200/400・マジカルリンクが使える切り札！", "link"),
     };
@@ -354,6 +415,19 @@ public partial class MagicGame
                 var v = Img(howToPicture, UiKit.Art("bug"), Color.white);
                 v.preserveAspect = true;
                 Anchor(v.rectTransform, 0.45f, 0.25f, 0.62f, 0.45f);
+                break;
+            case "virus":
+                var names = new[] { "bug", "spam", "ransom" };
+                for (int i = 0; i < names.Length; i++)
+                {
+                    var img = Img(howToPicture, UiKit.Art(names[i]), Color.white);
+                    img.preserveAspect = true;
+                    Anchor(img.rectTransform, i / 3f, 0.35f, (i + 1) / 3f, 0.75f);
+                }
+                var wk = MakeText(howToPicture, "WEAK!", 56, UiKit.Hex("ffd84a"), TextAnchor.MiddleCenter, true);
+                wk.fontStyle = FontStyle.BoldAndItalic;
+                AddOutline(wk, Color.black, 3f);
+                Anchor(wk.rectTransform, 0, 0.08f, 1, 0.3f);
                 break;
             case "link":
                 var a = Img(howToPicture, UiKit.Art("red_cast"), Color.white);

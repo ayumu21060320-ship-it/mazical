@@ -287,6 +287,54 @@ namespace MagicBattle
         public string Text;
     }
 
+    // 依頼（ステージ）。だれのパソコンに、どんなウイルスがいるか
+    public class EnemySpec
+    {
+        public string Name, Short, Art;
+        public int Hp, Attack;
+        public float Speed;
+        public bool HasWeakness;
+        public Element Weakness;
+        public EnemySpec(string name, string sh, string art, int hp, int atk, float speed, bool weak, Element w)
+        { Name = name; Short = sh; Art = art; Hp = hp; Attack = atk; Speed = speed; HasWeakness = weak; Weakness = w; }
+    }
+
+    public class Request
+    {
+        public string Id, Client, Title, Message;
+        public int Stars;            // むずかしさ（★の数）
+        public EnemySpec[] Enemies;
+    }
+
+    public static class Requests
+    {
+        static EnemySpec Bug(int hp = 400) => new EnemySpec("バグ", "バ", "bug", hp, 35, 30f, true, Element.Fire);
+        static EnemySpec Worm(int hp = 400) => new EnemySpec("ワーム", "ワ", "worm", hp, 35, 32f, true, Element.Ice);
+        static EnemySpec Troy(int hp = 700) => new EnemySpec("トロイ", "ト", "troy", hp, 60, 22f, false, Element.None);
+
+        public static readonly Request[] All =
+        {
+            new Request
+            {
+                Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1,
+                Message = "明日出す宿題のファイルを開いたら、文字がめちゃくちゃに…。虫みたいなのが画面をはってる！",
+                Enemies = new[] { Bug(250), Bug(250) },
+            },
+            new Request
+            {
+                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2,
+                Message = "旅行の写真がどんどんコピーされて、パソコンがパンパン！ 紫のにょろにょろが増えてるの",
+                Enemies = new[] { Worm(350), Bug(300), Worm(350) },
+            },
+            new Request
+            {
+                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3,
+                Message = "職員室のパソコンに大きな一つ目のウイルスが…。成績のデータを人質にとられています。至急たのみます",
+                Enemies = new[] { Bug(), Worm(), Troy() },
+            },
+        };
+    }
+
     public class Battle
     {
         public const float GaugeLength = 100f;
@@ -300,16 +348,17 @@ namespace MagicBattle
         public const float ChargeMemory = 1.3f, ChargePower = 1.3f;
         readonly Random rng;
 
-        public Battle(int seed)
+        public Battle(int seed) : this(seed, Requests.All[Requests.All.Length - 1]) { }
+
+        public Battle(int seed, Request request)
         {
             rng = new Random(seed);
             Allies.Add(Ally("レッド", "レ", "red", Trait.FireUp, 1000));
             Allies.Add(Ally("ブルー", "ブ", "blue", Trait.IceUp, 1000));
             Allies.Add(Ally("イエロー", "イ", "yellow", Trait.MemoryUp, 1500));
-            // 敵はパソコンに入りこんだウイルス
-            Enemies.Add(Enemy("バグ", "バ", "bug", 400, 35, 30f, true, Element.Fire));
-            Enemies.Add(Enemy("ワーム", "ワ", "worm", 400, 35, 32f, true, Element.Ice));
-            Enemies.Add(Enemy("トロイ", "ト", "troy", 700, 60, 22f, false, Element.None));
+            // 敵は依頼主のパソコンに入りこんだウイルス
+            foreach (var e in request.Enemies)
+                Enemies.Add(Enemy(e.Name, e.Short, e.Art, e.Hp, e.Attack, e.Speed, e.HasWeakness, e.Weakness));
         }
 
         static Unit Ally(string name, string sh, string art, Trait t, int cap) => new Unit

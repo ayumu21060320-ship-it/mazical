@@ -56,6 +56,8 @@ public partial class MagicGame : MonoBehaviour
     Request currentRequest = Requests.All[0];
     Phase phase = Phase.Title;
     readonly Dictionary<Unit, List<Block>> drafts = new Dictionary<Unit, List<Block>>(); // 組みかけのコード
+    // キャラごとに最後に組んだコード（次の戦闘でもそのまま使う）
+    readonly Dictionary<string, List<Block>> savedDrafts = new Dictionary<string, List<Block>>();
     readonly Dictionary<Unit, List<Block>> linkDrafts = new Dictionary<Unit, List<Block>>(); // 組みかけのリンクプログラム
     bool linkMode;         // プログラム画面でリンクプログラムを組んでいる
     Unit linkPartner;      // そのときのペアの相手
@@ -209,7 +211,18 @@ public partial class MagicGame : MonoBehaviour
         battle = new Battle(System.Environment.TickCount, currentRequest);
         drafts.Clear();
         linkDrafts.Clear();
-        foreach (var a in battle.Allies) drafts[a] = new List<Block>();
+        int carried = 0;
+        foreach (var a in battle.Allies)
+        {
+            // 前に組んだコードがあればそのままセットし、送信できる形なら送信もしておく
+            if (!savedDrafts.TryGetValue(a.Art, out var code)) { code = new List<Block>(); savedDrafts[a.Art] = code; }
+            drafts[a] = code;
+            if (code.Count > 0 && Compiler.Check(code, battle.CapacityOf(a), out _))
+            {
+                battle.SetSpell(a, Compiler.Build(code, battle.CapacityOf(a)));
+                carried++;
+            }
+        }
         linkMode = false;
         linkPartner = null;
         selected = editing = battle.Allies[0];
@@ -222,6 +235,7 @@ public partial class MagicGame : MonoBehaviour
         phase = Phase.Planning;
         log.Clear();
         AddLog(currentRequest.Client + "のパソコンにつないだ！ 味方を選んで「プログラム」で魔法を組もう");
+        if (carried > 0) AddLog("前に組んだプログラムを " + carried + " 人にセットした。そのまま「バトル開始」もできる");
         BuildUnits();
         programScreen.SetActive(false);
         resultPanel.SetActive(false);
@@ -257,6 +271,7 @@ public partial class MagicGame : MonoBehaviour
         if (battle.TurnOver)
         {
             foreach (var note in battle.EndTurn()) AddLog(note);
+            StartCoroutine(TurnBanner(battle.Turn));
             phase = Phase.Planning;
             AddLog("ターン" + battle.Turn + "。プログラムを組み直すか、そのまま「バトル開始」");
             RefreshBattle();
@@ -945,6 +960,54 @@ public partial class MagicGame : MonoBehaviour
         StartCoroutine(Noise(0.5f, 0.6f));
     }
 
+    // 「○ターン目」の大きな帯：横からスライドして入り、少し止まって反対へ抜ける
+    IEnumerator TurnBanner(int turn)
+    {
+        var band = Img(effects, UiKit.Slant(), new Color(0.03f, 0.02f, 0.08f, 0.85f));
+        band.type = Image.Type.Sliced;
+        var b = band.rectTransform;
+        Anchor(b, -0.05f, 0.47f, 1.05f, 0.65f);
+        var stripeTop = Img(b, null, Pink).rectTransform;
+        Anchor(stripeTop, 0, 1, 1, 1, 0, -6, 0, 0);
+        var stripeBottom = Img(b, null, Cyan).rectTransform;
+        Anchor(stripeBottom, 0, 0, 1, 0, 0, 0, 0, 6);
+        var textRoot = NewRect(b, "Text");
+        Fill(textRoot);
+        var t = MakeText(textRoot, turn + "ターン目", 120, Color.white, TextAnchor.MiddleCenter, true);
+        t.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(t, UiKit.Hex("1e5cf0"), 5f);
+        var sub = MakeText(textRoot, turn == 1 ? "プログラムを組んで「バトル開始」！" : "プログラムはそのまま。組み直してもOK", 30, Cyan, TextAnchor.LowerCenter, true);
+        Anchor(sub.rectTransform, 0, 0, 1, 1, 0, 14, 0, 0);
+
+        // 帯が開く
+        for (float k = 0f; k < 1f; k += Time.deltaTime / 0.12f) { b.localScale = new Vector3(1f, k, 1f); yield return null; }
+        b.localScale = Vector3.one;
+        // 文字が右から入る（入るときに少し行きすぎて戻る）、しま模様は左から
+        for (float k = 0f; k < 1f; k += Time.deltaTime / 0.32f)
+        {
+            float e = 1f - Mathf.Pow(1f - k, 3f);
+            float over = Mathf.Sin(k * Mathf.PI) * 40f;
+            textRoot.anchoredPosition = new Vector2(Mathf.Lerp(1400f, 0f, e) - over, 0);
+            stripeTop.anchoredPosition = new Vector2(Mathf.Lerp(-1900f, 0f, e), 0);
+            stripeBottom.anchoredPosition = new Vector2(Mathf.Lerp(1900f, 0f, e), 0);
+            yield return null;
+        }
+        textRoot.anchoredPosition = Vector2.zero;
+        stripeTop.anchoredPosition = stripeBottom.anchoredPosition = Vector2.zero;
+        yield return new WaitForSeconds(0.85f);
+        // 左へ抜ける
+        for (float k = 0f; k < 1f; k += Time.deltaTime / 0.22f)
+        {
+            float e = k * k;
+            textRoot.anchoredPosition = new Vector2(Mathf.Lerp(0f, -1500f, e), 0);
+            stripeTop.anchoredPosition = new Vector2(Mathf.Lerp(0f, 1900f, e), 0);
+            stripeBottom.anchoredPosition = new Vector2(Mathf.Lerp(0f, -1900f, e), 0);
+            yield return null;
+        }
+        for (float k = 1f; k > 0f; k -= Time.deltaTime / 0.1f) { b.localScale = new Vector3(1f, k, 1f); yield return null; }
+        Destroy(band.gameObject);
+    }
+
     // ================= ノイズ（ウイルスの侵入） =================
 
     // 登場演出：警告 → 砂嵐 → ウイルスが 1 体ずつ色ずれしながら現れる
@@ -975,6 +1038,7 @@ public partial class MagicGame : MonoBehaviour
         }
         intro = false;
         RefreshBattle();
+        StartCoroutine(TurnBanner(battle.Turn));
     }
 
     IEnumerator Materialize(UnitView v)

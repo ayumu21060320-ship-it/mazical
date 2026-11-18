@@ -74,8 +74,8 @@ public partial class MagicGame
             var rt = img.rectTransform;
             rt.anchorMin = rt.anchorMax = new Vector2(xs[i], i == 1 ? 0.17f : 0.2f);
             rt.pivot = new Vector2(0.5f, 0f);
-            rt.sizeDelta = UiKit.ArtSize(c.Art + "_idle") * 7.5f;
-            ambient.StartCoroutine(TitleBob(rt, img, c.Art + "_idle", 7.5f));
+            rt.sizeDelta = UiKit.ArtSize(c.Art + "_idle") * 6.3f;
+            ambient.StartCoroutine(TitleBob(rt, img, c.Art + "_idle", 6.3f));
             var name = MakeText(rt, c.Name, 30, Color.white, TextAnchor.MiddleCenter, true);
             Anchor(name.rectTransform, -0.5f, 0, 1.5f, 0, 0, -50, 0, 0);
             AddOutline(name, Purple, 3f);

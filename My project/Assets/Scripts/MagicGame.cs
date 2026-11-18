@@ -41,8 +41,8 @@ public partial class MagicGame : MonoBehaviour
     static readonly Color ChargeColor = UiKit.Hex("ffd84a");
     static readonly Color StartColor = UiKit.Hex("f2b632");
 
-    const float AllyScale = 6f;        // 戦闘画面のドット 1 つの大きさ
-    static readonly RectInt FaceCrop = new RectInt(5, 1, 30, 27);   // 顔だけ切り出す範囲（上から数える）
+    const float AllyScale = 5f;        // 戦闘画面のドット 1 つの大きさ
+    static readonly RectInt FaceCrop = new RectInt(15, 0, 32, 30);   // 顔だけ切り出す範囲（上から数える）
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Boot()
@@ -707,7 +707,7 @@ public partial class MagicGame : MonoBehaviour
         headerText.text = linkMode ? "リンクプログラム" : "プログラム";
         cancelLinkButton.SetActive(false);   // 決めた行動は選び直せないので、送ったリンクも取り消さない
         partnerPortrait.gameObject.SetActive(linkMode);
-        if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(0, 0, 40, 44));
+        if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(4, 0, 52, 50));
         foreach (var t in robotTabs)
         {
             if (t.unit == null || !t.bg.gameObject.activeSelf) continue;
@@ -717,7 +717,7 @@ public partial class MagicGame : MonoBehaviour
             t.text.text = t.unit.Name + (t.unit.Spell != null ? "\n<size=18>送信済み</size>" : "") + (t.unit.Alive ? "" : "\n<size=18>戦闘不能</size>");
         }
         robotName.text = linkMode ? editing.Name + "＋" + linkPartner.Name : editing.Name;
-        robotPortrait.sprite = UiKit.Art(editing.Art + "_idle", new RectInt(0, 0, 40, 44));
+        robotPortrait.sprite = UiKit.Art(editing.Art + "_idle", new RectInt(4, 0, 52, 50));
         bubbleText.text = linkMode ? editing.TraitName() + "\n＋\n" + linkPartner.TraitName() : editing.TraitName().Replace(" ", "\n");
         bubbleText.fontSize = linkMode ? 26 : 36;
 
@@ -904,7 +904,7 @@ public partial class MagicGame : MonoBehaviour
     {
         var rt = Img(effects, UiKit.MagicCircle(), new Color(color.r, color.g, color.b, 0.9f)).rectTransform;
         rt.sizeDelta = new Vector2(130, 130);
-        rt.position = v.Art.TransformPoint(new Vector3(v.Size.x * 0.5f, v.Size.y * 0.42f, 0));
+        rt.position = v.Art.TransformPoint(new Vector3(v.Size.x * 0.35f, v.Size.y * 0.6f, 0));
         StartCoroutine(Spin(rt, 300f));
         return rt;
     }
@@ -972,7 +972,7 @@ public partial class MagicGame : MonoBehaviour
         orb.sizeDelta = Vector2.one * (big ? 34f : 24f);
         var core = Img(orb, UiKit.Circle(), Color.white).rectTransform;
         core.sizeDelta = Vector2.one * (big ? 16f : 11f);
-        Vector3 a = from.Art.TransformPoint(new Vector3(from.Size.x * 0.5f, from.Size.y * 0.42f, 0));
+        Vector3 a = from.Art.TransformPoint(new Vector3(from.Size.x * 0.35f, from.Size.y * 0.6f, 0));
         UnitView tv;
         views.TryGetValue(h.Target, out tv);
         Vector3 b = tv != null ? tv.Art.TransformPoint(new Vector3(0, tv.Size.y * 0.5f, 0)) : a;
@@ -1410,9 +1410,9 @@ public partial class MagicGame : MonoBehaviour
         }
 
         // 3人（ピンクが前、青と黄色が後ろ）
-        TitleGirl("blue_idle", 0.64f, 0.1f, 7.5f, new Color(0.93f, 0.93f, 1f));
-        TitleGirl("yellow_idle", 0.9f, 0.1f, 7.5f, new Color(0.93f, 0.93f, 1f));
-        TitleGirl("red_idle", 0.77f, 0.03f, 9.5f, Color.white);
+        TitleGirl("blue_idle", 0.64f, 0.1f, 6.3f, new Color(0.93f, 0.93f, 1f));
+        TitleGirl("yellow_idle", 0.9f, 0.1f, 6.3f, new Color(0.93f, 0.93f, 1f));
+        TitleGirl("red_idle", 0.77f, 0.03f, 8f, Color.white);
 
         // ロゴ
         var logo = Img(titleLayer, UiKit.RoundRect(40), new Color(1, 1, 1, 0.88f));
@@ -1728,7 +1728,7 @@ public partial class MagicGame : MonoBehaviour
             var face = Img(box, UiKit.Art(u.Art + "_idle", FaceCrop), Color.white).rectTransform;
             face.anchorMin = face.anchorMax = new Vector2(0.5f, 1f);
             face.pivot = new Vector2(0.5f, 1f);
-            face.sizeDelta = new Vector2(30, 27) * 4f;
+            face.sizeDelta = new Vector2(32, 30) * 3.6f;
             var plate = Img(box, UiKit.Slant(), new Color(0.12f, 0.12f, 0.16f, 0.95f));
             plate.type = Image.Type.Sliced;
             plate.raycastTarget = true;

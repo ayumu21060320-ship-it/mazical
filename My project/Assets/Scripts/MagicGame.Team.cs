@@ -248,7 +248,7 @@ public partial class MagicGame
         var art = Img(loadoutArea, UiKit.Art(c.Art + "_idle"), Color.white).rectTransform;
         art.anchorMin = art.anchorMax = new Vector2(0.5f, 0.14f);
         art.pivot = new Vector2(0.5f, 0f);
-        art.sizeDelta = UiKit.ArtSize(c.Art + "_idle") * 12f;
+        art.sizeDelta = UiKit.ArtSize(c.Art + "_idle") * 10f;
 
         // キャラの能力
         int hp = c.Hp + (lv - 1) * Levels.HpPerLevel;

@@ -154,6 +154,7 @@ namespace MagicBattle
         public List<Block> Code;      // 送信したコード（もし・繰り返すを打つ瞬間に決めるため）
         public int Capacity;
         public bool HasControl;
+        public bool AutoElement;      // マジカルリンクだけで属性のブロックが無い：ペアの得意な属性を使う
         public TargetType Target;
         public int Power;
         public int Shots;
@@ -331,6 +332,8 @@ namespace MagicBattle
                 }
             }
             if (elements > 2) { message = "属性のブロックは2つまでです"; return false; }
+            // マジカルリンクはそのブロック1つで魔法が完成する（ほかのブロックは無くてもよい）
+            if (code.Exists(b => b.Kind == BlockKind.MagicLink)) { message = ""; return true; }
             for (var k = BlockKind.Element; k <= BlockKind.Shots; k++)
             {
                 if (!code.Exists(b => b.Kind == k)) { message = Blocks.KindName(k) + "のブロックがありません"; return false; }
@@ -363,6 +366,14 @@ namespace MagicBattle
             bool ctx = caster != null;
             var plain = Flatten(code, k => !ctx || (k < ifs.Count && Evaluate(ifs[k], caster, target, enemyCount)), out int repeat);
             var s = new Spell { Memory = MemoryUsed(code, capacity), Code = new List<Block>(), Capacity = capacity };
+            if (plain.Exists(b => b.Kind == BlockKind.MagicLink))
+            {
+                // マジカルリンクだけでも魔法になるように、置いていない所は自動で決める
+                s.AutoElement = !plain.Exists(b => b.Kind == BlockKind.Element);
+                s.Target = TargetType.All;
+                s.Power = Math.Max(10, capacity / 20 / 10 * 10);   // メモリ 20 につき威力 1（10 きざみ）
+                s.Shots = 1;
+            }
             foreach (var b in code) s.Code.Add(b.Clone());
             s.HasControl = code.Exists(b => Blocks.IsControl(b.Kind));
             bool firstElement = true;
@@ -384,6 +395,17 @@ namespace MagicBattle
             return s;
         }
 
+        // マジカルリンクで属性を置いていなければ、2人の得意な属性にする（炎 UP→炎、氷 UP→氷、メモリ UP→無）
+        public static void ApplyLinkElements(Spell s, Unit main, Unit partner)
+        {
+            if (!s.AutoElement || main == null) return;
+            s.Element = TraitElement(main);
+            s.HasElement2 = false;
+            if (partner != null && TraitElement(partner) != s.Element) { s.HasElement2 = true; s.Element2 = TraitElement(partner); }
+        }
+
+        static Element TraitElement(Unit u) => u.Trait == Trait.FireUp ? Element.Fire : u.Trait == Trait.IceUp ? Element.Ice : Element.None;
+
         // 打つ瞬間に、条件を見て魔法を決め直す（もしが無ければそのまま）
         public static Spell Resolve(Spell s, Unit caster, Unit target, int enemyCount)
         {
@@ -392,6 +414,7 @@ namespace MagicBattle
             r.IsLink = s.IsLink;
             r.Partner = s.Partner;
             r.Memory = s.Memory;
+            ApplyLinkElements(r, caster, s.Partner);
             return r;
         }
 
@@ -820,6 +843,7 @@ namespace MagicBattle
             main.Charging = false;
             spell.IsLink = true;
             spell.Partner = partner;
+            Compiler.ApplyLinkElements(spell, main, partner);
             main.Spell = spell;
             UpdateSpeed(main);
             UpdateSpeed(partner);

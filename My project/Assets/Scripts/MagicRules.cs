@@ -819,12 +819,12 @@ namespace MagicBattle
         public bool Won => !Enemies.Exists(e => e.Alive) && Wave + 1 >= WaveCount;
         public bool Lost => !Allies.Exists(a => a.Alive);
 
-        // 生きている全員が 1 回以上行動したらターンが終わる（速いキャラは 2 回以上行動できる）
+        // 生きている全員が 1 回以上行動したらターンが終わる（速いキャラは 2 回以上行動できる）。チャージ中の味方は数えない
         public bool TurnOver
         {
             get
             {
-                foreach (var u in All()) if (u.Alive && !u.ActedThisTurn) return false;
+                foreach (var u in All()) if (u.Alive && !u.Charging && !u.ActedThisTurn) return false;
                 return true;
             }
         }
@@ -834,13 +834,13 @@ namespace MagicBattle
         {
             Unit best = null;
             foreach (var u in All())
-                if (u.Alive && u.Gauge >= GaugeLength && (best == null || u.Gauge > best.Gauge)) best = u;
+                if (u.Alive && !u.Charging && u.Gauge >= GaugeLength && (best == null || u.Gauge > best.Gauge)) best = u;
             return best;
         }
 
         public void Advance(float dt)
         {
-            foreach (var u in All()) if (u.Alive) u.Gauge += u.Speed * dt;
+            foreach (var u in All()) if (u.Alive && !u.Charging) u.Gauge += u.Speed * dt;   // チャージ中はタイムラインに出ない
         }
 
         // ターンの終わり。チャージは次のターンだけ効く。リンクはそのターンだけ。お知らせを返す

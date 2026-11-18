@@ -378,14 +378,18 @@ namespace MagicBattle
             "データにカギをかけて人質にする。攻撃された味方はメモリが減ってしまう");
         public static readonly EnemySpec Troy = new EnemySpec("トロイ", "ト", "troy", 700, 45, 22f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.AllAttack,
             "安全なプログラムのふりをして入りこむ大物。炎も氷も効きにくく、全員を攻撃してくる");
-        public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Troy };
+        public static readonly EnemySpec Rootkit = new EnemySpec("ルートキット", "ル", "rootkit", 1100, 50, 24f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.Regen,
+            "パソコンのいちばん奥にひそむ親玉。炎も氷も効きにくく、ターンごとに回復する。強敵戦の最後に出てくる");
+        public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Troy, Rootkit };
     }
 
     public class Request
     {
         public string Id, Client, Title, Message;
         public int Stars;            // むずかしさ（★の数）
-        public EnemySpec[] Enemies;
+        public EnemySpec[] Enemies;  // 最初に出てくるウイルス
+        public EnemySpec[][] Waves;  // 強敵戦：倒すと次のウイルスが出てくる（null ならふつうの依頼）
+        public bool IsBoss => Waves != null && Waves.Length > 1;
     }
 
     public static class Requests
@@ -395,6 +399,7 @@ namespace MagicBattle
         static EnemySpec Spam(int hp = 220) => Viruses.Spam.WithHp(hp);
         static EnemySpec Ransom(int hp = 500) => Viruses.Ransom.WithHp(hp);
         static EnemySpec Troy(int hp = 700) => Viruses.Troy.WithHp(hp);
+        static EnemySpec Rootkit(int hp = 1100) => Viruses.Rootkit.WithHp(hp);
 
         public static readonly Request[] All =
         {
@@ -422,6 +427,18 @@ namespace MagicBattle
                 Message = "職員室のパソコンに大きな一つ目のウイルスが…。成績のデータを人質にとられています。至急たのみます",
                 Enemies = new[] { Bug(), Worm(), Troy() },
             },
+            new Request
+            {
+                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3,
+                Message = "店じゅうのパソコンがウイルスの巣に…！ 倒しても倒しても奥から出てくる。いちばん奥に親玉がいるはずだ",
+                Enemies = new[] { Bug(), Spam(), Bug() },
+                Waves = new[]
+                {
+                    new[] { Bug(), Spam(), Bug() },
+                    new[] { Worm(), Ransom(), Worm() },
+                    new[] { Spam(), Rootkit(), Spam() },
+                },
+            },
         };
     }
 
@@ -440,9 +457,15 @@ namespace MagicBattle
 
         public Battle(int seed) : this(seed, Requests.All[Requests.All.Length - 1]) { }
 
+        public int Wave;           // いまのウェーブ（0 から）
+        public int WaveCount = 1;
+        EnemySpec[][] waves;
+
         public Battle(int seed, Request request)
         {
             rng = new Random(seed);
+            waves = request.Waves ?? new[] { request.Enemies };
+            WaveCount = waves.Length;
             foreach (var c in Characters.All)
             {
                 var a = Ally(c.Name, c.Short, c.Art, c.Trait, c.Capacity);
@@ -450,12 +473,32 @@ namespace MagicBattle
                 Allies.Add(a);
             }
             // 敵は依頼主のパソコンに入りこんだウイルス
-            foreach (var e in request.Enemies)
+            SpawnWave(0);
+        }
+
+        void SpawnWave(int index)
+        {
+            Wave = index;
+            Enemies.Clear();
+            foreach (var e in waves[index])
                 Enemies.Add(new Unit
                 {
                     Name = e.Name, Short = e.Short, Art = e.Art, IsAlly = false, MaxHp = e.Hp, Hp = e.Hp, Attack = e.Attack, Speed = e.Speed,
                     Weak = e.Weak, Resist = e.Resist, Ability = e.Ability,
                 });
+            TargetIndex = 0;
+        }
+
+        // いまのウェーブを全部倒したが、まだ次のウェーブがある
+        public bool WaveCleared => !Enemies.Exists(e => e.Alive) && Wave + 1 < WaveCount;
+
+        // 次のウェーブへ。ターンも区切る（プログラムを組み直せる）。お知らせを返す
+        public List<string> NextWave()
+        {
+            SpawnWave(Wave + 1);
+            var notes = EndTurn();
+            notes.Insert(0, "WAVE " + (Wave + 1) + " / " + WaveCount + "：奥から新しいウイルスが出てきた！");
+            return notes;
         }
 
         static Unit Ally(string name, string sh, string art, Trait t, int cap) => new Unit
@@ -536,7 +579,7 @@ namespace MagicBattle
             UpdateSpeed(p);
         }
 
-        public bool Won => !Enemies.Exists(e => e.Alive);
+        public bool Won => !Enemies.Exists(e => e.Alive) && Wave + 1 >= WaveCount;
         public bool Lost => !Allies.Exists(a => a.Alive);
 
         // 生きている全員が 1 回以上行動したらターンが終わる（速いキャラは 2 回以上行動できる）

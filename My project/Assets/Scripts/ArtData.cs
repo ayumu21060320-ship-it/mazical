@@ -216,5 +216,14 @@ public static class ArtData
             "fQ3t3+9If1xfLDxBvPCFJaGPKXrln/gBTSt3OtLgo8WJDwcAKbwFT7zX5IFzmJh3ukL7/O1FaFeVurAXyP8pKF4TeeAcPK+1U8csZUGrSj3aORCbk6fnyMwF" +
             "Y7V2JBK5DSSlhJrWKs/vC1DbwcWay1Red32TvgZqWpnVnqXSJptMGjgr9xtHIKxwjoPtpPxv1UAYxCOQBt84BXkikbsG+OeYmtZ+T0QcfuZSfKlk58DgLljY" +
             "SbjwI//n1c3xv+Nw9AcRLsbCX3rZpAAAAABJRU5ErkJggg==" },
+        { "rootkit",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACQ0lEQVR42sVXPWvCQBh+IgGX0KaQQRxCh+Jg5ab8iEIdnFwc3KS/oc7tbyjdHLp06mChY39A" +
+            "pmCFlg7iIA4Wo7gUCukgl4/z7nLnB74gcrnL+/Hc834E0JCqS6KqS6Jt93li6hj3gtp6QRANx4Ghsy+SgrZxBfGCGlSRKODIonQFw3FggCACALtcEp77vpoh" +
+            "nEyTd7ZxgELHKhiOAyMNqwxinnGRXnMbIp1bda7hEL42gU0VolHvz606sBTDaS892BYAF5EICS+oZZwQcsAul1AFIlnEIonPu/m8MXiRpp2wl95OLA9P/JiY" +
+            "PI6Yog3WmdGqn8sD2RkRn6RpmI4+rez14457/vqSryNEf3+FiBpvL1qZH8+xZqOjVgnZJlJ1ScSDmDXQO32Snnl+eYzRY/XTdYGmn079phG3Fy34ZJB5ptpX" +
+            "qD0znfs0Rw9V99la4wW1TQ7Y5ZI0b0XQ856p6C1QCAHAJwOEk+lG3iYs73Jbb94ZALFe1p7BaxQsCZuNTkwoeRp2hQiMVv2MfmrPkN3X3+ps6/u+venh/qG9" +
+            "LjbWXFiIDuZAptpJHJAWIqdSzKw/f95hWnOlf5EO7WY0+/rNRKIqFD2nUlRrRmyO0vHKtBJluldiWnOEk3UgF29OsqEyD4ST6QZrVR2gSMXvAxHgyGdCOnjy" +
+            "pqK0I+y1sJxJO84Tnwxy5gEiHqfyuVDKnapZvYZOHafE5EVJ0dl5LFdpIj7hl+o10Rytz7OjfxkpOTAcB0a6ieQJS7S99vN9f57/A6rkc5xY3sdjAAAAAElF" +
+            "TkSuQmCC" },
     };
 }

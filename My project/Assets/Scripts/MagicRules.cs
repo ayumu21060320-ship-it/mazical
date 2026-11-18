@@ -287,6 +287,27 @@ namespace MagicBattle
         public string Text;
     }
 
+    // AI ロボット（味方）の情報。キャラクター画面と戦闘で使う
+    public class CharacterInfo
+    {
+        public string Name, Short, Art, Description;
+        public Trait Trait;
+        public int Capacity, Hp;
+    }
+
+    public static class Characters
+    {
+        public static readonly CharacterInfo[] All =
+        {
+            new CharacterInfo { Name = "レッド", Short = "レ", Art = "red", Trait = Trait.FireUp, Capacity = 1000, Hp = 300,
+                Description = "元気いっぱいの炎の魔法使い。炎属性の魔法の威力が 1.5 倍" },
+            new CharacterInfo { Name = "ブルー", Short = "ブ", Art = "blue", Trait = Trait.IceUp, Capacity = 1000, Hp = 300,
+                Description = "冷静な氷の魔法使い。氷属性の魔法の威力が 1.5 倍" },
+            new CharacterInfo { Name = "イエロー", Short = "イ", Art = "yellow", Trait = Trait.MemoryUp, Capacity = 1500, Hp = 300,
+                Description = "強気な天才。メモリ容量が大きく、長いプログラムを組める" },
+        };
+    }
+
     // 依頼（ステージ）。だれのパソコンに、どんなウイルスがいるか
     public class EnemySpec
     {
@@ -353,9 +374,12 @@ namespace MagicBattle
         public Battle(int seed, Request request)
         {
             rng = new Random(seed);
-            Allies.Add(Ally("レッド", "レ", "red", Trait.FireUp, 1000));
-            Allies.Add(Ally("ブルー", "ブ", "blue", Trait.IceUp, 1000));
-            Allies.Add(Ally("イエロー", "イ", "yellow", Trait.MemoryUp, 1500));
+            foreach (var c in Characters.All)
+            {
+                var a = Ally(c.Name, c.Short, c.Art, c.Trait, c.Capacity);
+                a.MaxHp = a.Hp = c.Hp;
+                Allies.Add(a);
+            }
             // 敵は依頼主のパソコンに入りこんだウイルス
             foreach (var e in request.Enemies)
                 Enemies.Add(Enemy(e.Name, e.Short, e.Art, e.Hp, e.Attack, e.Speed, e.HasWeakness, e.Weakness));

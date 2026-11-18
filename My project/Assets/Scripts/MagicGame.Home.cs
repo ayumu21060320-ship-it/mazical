@@ -1,0 +1,582 @@
+// ホーム画面と、そこから開く画面
+//   ホーム:       タイトルの「スタート」のあと。依頼・キャラクター・ブロック図鑑を選ぶ。右上の歯車で遊び方
+//   キャラクター: 味方の AI ロボットの説明（HP・メモリ・特性）。まだ仲間になっていないキャラは「？？？」
+//   ブロック図鑑: プログラムのブロックの説明。リンク専用と、まだ使えないブロック（条件分岐・繰り返し）も載せる
+//   遊び方:       ページをめくって読む説明
+//   ハッキング:   依頼を選んだあと、相手のパソコンにつないで直そうとするが、ウイルスがエラーを起こして抵抗し、戦闘になる
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using MagicBattle;
+
+public partial class MagicGame
+{
+    RectTransform homeLayer, charLayer, bookLayer, howToLayer;
+    Text homeBadgeText;
+    GameObject homeBadge;
+    Text howToTitle, howToBody, howToPage;
+    RectTransform howToPicture;
+    int howToIndex;
+
+    // 画面をぜんぶ隠す（どれか 1 つを出す前に呼ぶ）
+    void HideScreens()
+    {
+        titleLayer.gameObject.SetActive(false);
+        battleLayer.gameObject.SetActive(false);
+        requestLayer.gameObject.SetActive(false);
+        homeLayer.gameObject.SetActive(false);
+        charLayer.gameObject.SetActive(false);
+        bookLayer.gameObject.SetActive(false);
+        howToLayer.gameObject.SetActive(false);
+        programScreen.SetActive(false);
+    }
+
+    // 画面の背景（ピンク〜水色のグラデーションと魔法陣）と、左上の青い見出し
+    RectTransform MenuScreen(string name, string heading)
+    {
+        var layer = Layer(name);
+        var bg = layer.gameObject.AddComponent<RawImage>();
+        bg.texture = UiKit.DiagonalGradient(UiKit.Hex("ffc3e6"), UiKit.Hex("b4e0ff"));
+        var mc = Img(layer, UiKit.MagicCircle(), new Color(1, 1, 1, 0.3f)).rectTransform;
+        mc.anchorMin = mc.anchorMax = new Vector2(0.86f, 0.18f);
+        mc.sizeDelta = new Vector2(760, 760);
+        ambient.StartCoroutine(SpinForever(mc, 4f));
+        var header = Img(layer, UiKit.Slant(), UiKit.Hex("1e5cf0"));
+        header.type = Image.Type.Sliced;
+        Anchor(header.rectTransform, -0.02f, 0.88f, 0.3f, 0.97f);
+        var ht = MakeText(header.rectTransform, heading, 56, Color.white, TextAnchor.MiddleCenter, true);
+        ht.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(ht, UiKit.Hex("0a1c60"), 3f);
+        layer.gameObject.SetActive(false);
+        return layer;
+    }
+
+    // ================= ホーム =================
+
+    void BuildHome()
+    {
+        homeLayer = MenuScreen("Home", "ホーム");
+
+        // 味方の 3 人（舞台の上）
+        var stageImg = Img(homeLayer, UiKit.Glow(), new Color(1f, 1f, 1f, 0.6f)).rectTransform;
+        stageImg.anchorMin = stageImg.anchorMax = new Vector2(0.27f, 0.2f);
+        stageImg.sizeDelta = new Vector2(900, 160);
+        var xs = new[] { 0.13f, 0.27f, 0.41f };
+        for (int i = 0; i < Characters.All.Length && i < xs.Length; i++)
+        {
+            var c = Characters.All[i];
+            var img = Img(homeLayer, UiKit.Art(c.Art + "_idle"), Color.white);
+            var rt = img.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(xs[i], i == 1 ? 0.17f : 0.2f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.sizeDelta = UiKit.ArtSize(c.Art + "_idle") * 7.5f;
+            ambient.StartCoroutine(TitleBob(rt, img, c.Art + "_idle", 7.5f));
+            var name = MakeText(rt, c.Name, 30, Color.white, TextAnchor.MiddleCenter, true);
+            Anchor(name.rectTransform, -0.5f, 0, 1.5f, 0, 0, -50, 0, 0);
+            AddOutline(name, Purple, 3f);
+        }
+        var hello = Img(homeLayer, UiKit.RoundRect(30), new Color(0.12f, 0.1f, 0.16f, 0.85f));
+        hello.type = Image.Type.Sliced;
+        Anchor(hello.rectTransform, 0.05f, 0.74f, 0.5f, 0.85f);
+        MakeText(hello.rectTransform, "依頼が来てるよ！ 今日はどのパソコンを助ける？", 28, Color.white, TextAnchor.MiddleCenter, true);
+
+        // メニュー（右側の大きな帯）
+        var items = new (string label, string sub, UnityEngine.Events.UnityAction act)[]
+        {
+            ("依頼", "ウイルスに困っている人を助ける", ShowRequests),
+            ("キャラクター", "AI ロボットの特性を見る", ShowCharacters),
+            ("ブロック図鑑", "プログラムのブロックを調べる", ShowBlockBook),
+            ("タイトルへ", "", ShowTitle),
+        };
+        for (int i = 0; i < items.Length; i++)
+        {
+            var it = items[i];
+            bool main = i == 0;
+            var b = CommandButton(homeLayer, it.label, main ? 56 : 46, it.act, main);
+            var rt = (RectTransform)b.transform;
+            float top = 0.82f - i * 0.17f;
+            Anchor(rt, 0.56f + i * 0.015f, top - (i == 3 ? 0.09f : 0.13f), 0.95f, top);
+            if (it.sub != "")
+            {
+                var sub = MakeText(rt, it.sub, 22, main ? Color.white : UiKit.Hex("a8f4ff"), TextAnchor.LowerRight, false);
+                Anchor(sub.rectTransform, 0, 0, 1, 1, 0, 8, -40, 0);
+            }
+            if (main)
+            {
+                var badge = Img(rt, UiKit.Circle(), UiKit.Hex("e8283c"));
+                badge.rectTransform.anchorMin = badge.rectTransform.anchorMax = new Vector2(0.97f, 0.95f);
+                badge.rectTransform.sizeDelta = new Vector2(56, 56);
+                var ol = badge.gameObject.AddComponent<Outline>();
+                ol.effectColor = Color.white;
+                ol.effectDistance = new Vector2(3, -3);
+                homeBadgeText = MakeText(badge.rectTransform, "", 34, Color.white, TextAnchor.MiddleCenter, true);
+                homeBadge = badge.gameObject;
+            }
+        }
+
+        // 歯車（遊び方）
+        var gear = Img(homeLayer, UiKit.Circle(), Color.white);
+        gear.raycastTarget = true;
+        gear.rectTransform.anchorMin = gear.rectTransform.anchorMax = new Vector2(0.96f, 0.93f);
+        gear.rectTransform.sizeDelta = new Vector2(96, 96);
+        var gearIcon = NewRect(gear.rectTransform, "Gear");
+        Anchor(gearIcon, 0, 0, 1, 1, 8, 8, -8, -8);
+        IconGear(gearIcon);
+        var gb = gear.gameObject.AddComponent<Button>();
+        gb.targetGraphic = gear;
+        gb.onClick.AddListener(() => ShowHowTo(0));
+        var gl = MakeText(homeLayer, "遊び方", 24, Ink, TextAnchor.MiddleCenter, true);
+        Anchor(gl.rectTransform, 0.92f, 0.83f, 1f, 0.88f);
+    }
+
+    void ShowHome()
+    {
+        StopAllCoroutines();
+        ClearChildren(effects);
+        phase = Phase.Home;
+        HideScreens();
+        homeLayer.gameObject.SetActive(true);
+        int n = 0;
+        foreach (var r in Requests.All) if (!IsCleared(r)) n++;
+        homeBadge.SetActive(n > 0);
+        homeBadgeText.text = n.ToString();
+    }
+
+    // ================= キャラクター =================
+
+    void BuildCharacters()
+    {
+        charLayer = MenuScreen("Characters", "キャラクター");
+        var list = NewRect(charLayer, "List");
+        Anchor(list, 0.03f, 0.14f, 0.97f, 0.86f);
+        int slots = 5;   // 3 人 ＋ まだ仲間になっていない 2 人
+        for (int i = 0; i < slots; i++)
+        {
+            var border = Img(list, UiKit.RoundRect(26), i < Characters.All.Length ? Purple : UiKit.Hex("8a8fa0"));
+            border.type = Image.Type.Sliced;
+            Anchor(border.rectTransform, i / (float)slots + 0.006f, 0, (i + 1) / (float)slots - 0.006f, 1);
+            var card = Img(border.rectTransform, UiKit.RoundRect(22), new Color(1, 1, 1, 0.94f));
+            card.type = Image.Type.Sliced;
+            var c = card.rectTransform;
+            Anchor(c, 0, 0, 1, 1, 5, 5, -5, -5);
+            if (i < Characters.All.Length)
+            {
+                var ch = Characters.All[i];
+                var art = Img(c, UiKit.Art(ch.Art + "_idle"), Color.white);
+                art.preserveAspect = true;
+                Anchor(art.rectTransform, 0.08f, 0.45f, 0.92f, 0.97f);
+                var name = MakeText(c, ch.Name, 40, Purple, TextAnchor.MiddleCenter, true);
+                Anchor(name.rectTransform, 0, 0.37f, 1, 0.45f);
+                var info = MakeText(c, "HP " + ch.Hp + "　メモリ " + ch.Capacity + "\n<color=#e0408a>" + TraitText(ch) + "</color>", 24, Ink, TextAnchor.UpperCenter, true);
+                info.supportRichText = true;
+                Anchor(info.rectTransform, 0.04f, 0.24f, 0.96f, 0.37f);
+                var desc = MakeText(c, ch.Description, 21, Ink, TextAnchor.UpperLeft, false);
+                Anchor(desc.rectTransform, 0.07f, 0.02f, 0.93f, 0.24f);
+            }
+            else
+            {
+                var sil = Img(c, UiKit.Art("red_idle"), new Color(0.2f, 0.18f, 0.28f, 0.9f));   // シルエット
+                sil.preserveAspect = true;
+                Anchor(sil.rectTransform, 0.08f, 0.45f, 0.92f, 0.97f);
+                var q = MakeText(c, "？？？", 40, UiKit.Hex("6a6e84"), TextAnchor.MiddleCenter, true);
+                Anchor(q.rectTransform, 0, 0.37f, 1, 0.45f);
+                var d = MakeText(c, "まだ仲間になっていない。\n依頼をこなすと、新しい AI ロボットが仲間になるかも…？（準備中）", 21, UiKit.Hex("6a6e84"), TextAnchor.UpperCenter, false);
+                Anchor(d.rectTransform, 0.07f, 0.05f, 0.93f, 0.35f);
+            }
+        }
+        var back = CommandButton(charLayer, "ホームへ", 32, ShowHome, false);
+        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
+    }
+
+    static string TraitText(CharacterInfo c) =>
+        c.Trait == Trait.FireUp ? "炎属性 火力UP" : c.Trait == Trait.IceUp ? "氷属性 火力UP" : "メモリ容量UP";
+
+    void ShowCharacters()
+    {
+        HideScreens();
+        charLayer.gameObject.SetActive(true);
+    }
+
+    // ================= ブロック図鑑 =================
+
+    void BuildBlockBook()
+    {
+        bookLayer = MenuScreen("BlockBook", "ブロック図鑑");
+        var list = NewRect(bookLayer, "List");
+        Anchor(list, 0.03f, 0.14f, 0.97f, 0.86f);
+        var entries = new (int color, string name, string desc, string tag)[]
+        {
+            (0, "属性を選択", "炎・氷・無から選ぶ。敵の弱点の属性なら威力 1.5 倍。リンクでは 2 つ置ける", ""),
+            (1, "対象に攻撃", "1体（ねらった敵）か全体。全体はメモリを多く使う", ""),
+            (2, "威力", "10〜120。大きいほどメモリを使う。リンクでは 200・400 も選べる", ""),
+            (3, "発射方法（回打つ）", "1〜3 回。回数が多いほどメモリを使う", ""),
+            (4, "追加効果を得る", "爆破（威力 1.3 倍）・回復（自分の HP）・スロー（敵のタイムラインを戻す）。無くてもよい", ""),
+            (5, "マジカルリンク", "残りのメモリを全部使って、コンビ魔法の威力を上げる（最大 2 倍）", "リンク専用"),
+            (-1, "もし〜なら（条件分岐）", "敵に合わせて属性や回数を変えられる", "まだ使えない"),
+            (-1, "〜回繰り返す", "決めた回数だけ、処理をくり返す", "まだ使えない"),
+        };
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var e = entries[i];
+            int col = i % 2, row = i / 2;
+            var cell = Img(list, UiKit.RoundRect(18), new Color(1, 1, 1, 0.92f));
+            cell.type = Image.Type.Sliced;
+            Anchor(cell.rectTransform, col * 0.5f + 0.005f, 1f - (row + 1) * 0.25f + 0.008f, (col + 1) * 0.5f - 0.005f, 1f - row * 0.25f - 0.008f);
+            var block = Img(cell.rectTransform, UiKit.BlockShape(), e.color >= 0 ? BlockColors[e.color] : UiKit.Hex("9a9eb0"));
+            block.type = Image.Type.Sliced;
+            Anchor(block.rectTransform, 0, 0.5f, 0, 0.5f, 20, -36, 330, 30);
+            var bn = MakeText(block.rectTransform, e.name, 24, Color.white, TextAnchor.MiddleLeft, true);
+            Anchor(bn.rectTransform, 0, 0, 1, 1, 18, UiKit.BlockTabHeight, 0, 0);
+            var desc = MakeText(cell.rectTransform, e.desc, 22, Ink, TextAnchor.MiddleLeft, false);
+            Anchor(desc.rectTransform, 0, 0, 1, 1, 350, 6, -16, -6);
+            if (e.tag != "")
+            {
+                var tag = Img(cell.rectTransform, UiKit.RoundRect(10), e.color >= 0 ? Pink : UiKit.Hex("6a6e84"));
+                tag.type = Image.Type.Sliced;
+                Anchor(tag.rectTransform, 1, 1, 1, 1, -170, -40, -12, -8);
+                MakeText(tag.rectTransform, e.tag, 20, Color.white, TextAnchor.MiddleCenter, true);
+            }
+        }
+        var back = CommandButton(bookLayer, "ホームへ", 32, ShowHome, false);
+        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
+    }
+
+    void ShowBlockBook()
+    {
+        HideScreens();
+        bookLayer.gameObject.SetActive(true);
+    }
+
+    // ================= 遊び方 =================
+
+    static readonly (string title, string body, string picture)[] HowToPages =
+    {
+        ("このゲームの目的",
+         "あなたはプログラマー。ウイルスに困っている人のパソコンにリモートでつないで、\nAI ロボットたちに魔法のプログラムを送り、ウイルスを撃退しよう。\n\nウイルスを全部倒せば勝ち。ロボットが全員倒れると負け。", "robots"),
+        ("プログラムを組む",
+         "戦闘画面で味方をクリックして選び、「プログラム」を押す。\n左の手持ちブロックを、右のコードへドラッグして並べる。\n\n並べる順番：属性 → 対象 → 威力 → 発射方法 → 追加効果（無くてもよい）\nブロックの ▼ をクリックすると中身が変わる。できたら「送信」！", "blocks"),
+        ("メモリと処理速度",
+         "ブロックはメモリを使う。メモリ容量をこえると送信できない。\nメモリをたくさん使うほど処理速度が遅くなり、行動が遅くなる。\n\n弱い魔法を何回も打つか、強い魔法をじっくり打つか、作戦を考えよう。", "memory"),
+        ("タイムライン",
+         "「バトル開始」でタイムラインが進む。右端に着いたキャラから行動する。\n全員が 1 回以上行動するとターンが終わり、またプログラムを組み直せる。\n\n速いキャラは、同じターンに 2 回行動できることもある。", "timeline"),
+        ("チャージとリンクプログラム",
+         "チャージ：そのターンは魔法を打たず、次のターンのメモリと攻撃力が 1.3 倍。\n\nリンクプログラム（1 試合 2 回）：ペアを選んで 2 人分のメモリで魔法を組む。\n属性 2 つ・威力 200/400・マジカルリンクが使える切り札！", "link"),
+    };
+
+    void BuildHowTo()
+    {
+        howToLayer = NewRect(root, "HowTo");
+        Fill(howToLayer);
+        var dim = howToLayer.gameObject.AddComponent<Image>();
+        dim.color = new Color(0, 0, 0, 0.55f);
+        var border = Img(howToLayer, UiKit.RoundRect(30), Purple);
+        border.type = Image.Type.Sliced;
+        Anchor(border.rectTransform, 0.12f, 0.1f, 0.88f, 0.9f);
+        var win = Img(border.rectTransform, UiKit.RoundRect(26), UiKit.Hex("f7eef8"));
+        win.type = Image.Type.Sliced;
+        Anchor(win.rectTransform, 0, 0, 1, 1, 6, 6, -6, -6);
+        var bar = Img(win.rectTransform, UiKit.RoundRect(26), Pink);
+        bar.type = Image.Type.Sliced;
+        Anchor(bar.rectTransform, 0, 1, 1, 1, 0, -70, 0, 0);
+        MakeText(bar.rectTransform, "　遊び方", 34, Color.white, TextAnchor.MiddleLeft, true);
+        howToPage = MakeText(bar.rectTransform, "", 28, Color.white, TextAnchor.MiddleRight, true);
+        Anchor(howToPage.rectTransform, 0, 0, 1, 1, 0, 0, -30, 0);
+        howToTitle = MakeText(win.rectTransform, "", 46, Purple, TextAnchor.MiddleLeft, true);
+        Anchor(howToTitle.rectTransform, 0, 1, 1, 1, 50, -160, -40, -90);
+        howToPicture = NewRect(win.rectTransform, "Picture");
+        Anchor(howToPicture, 0.04f, 0.22f, 0.38f, 0.78f);
+        howToBody = MakeText(win.rectTransform, "", 28, Ink, TextAnchor.UpperLeft, false);
+        Anchor(howToBody.rectTransform, 0.4f, 0.2f, 0.96f, 0.78f);
+        var prev = CommandButton(win.rectTransform, "◀ まえ", 30, () => ShowHowTo(howToIndex - 1), false);
+        Anchor((RectTransform)prev.transform, 0.04f, 0.04f, 0.24f, 0.13f);
+        var next = CommandButton(win.rectTransform, "つぎ ▶", 30, () => ShowHowTo(howToIndex + 1), false);
+        Anchor((RectTransform)next.transform, 0.52f, 0.04f, 0.72f, 0.13f);
+        var close = CommandButton(win.rectTransform, "とじる", 30, () => howToLayer.gameObject.SetActive(false), true);
+        Anchor((RectTransform)close.transform, 0.76f, 0.04f, 0.96f, 0.13f);
+        howToLayer.gameObject.SetActive(false);
+    }
+
+    void ShowHowTo(int index)
+    {
+        howToIndex = Mathf.Clamp(index, 0, HowToPages.Length - 1);
+        var p = HowToPages[howToIndex];
+        howToLayer.gameObject.SetActive(true);
+        howToLayer.SetAsLastSibling();
+        howToTitle.text = p.title;
+        howToBody.text = p.body;
+        howToPage.text = (howToIndex + 1) + " / " + HowToPages.Length;
+        ClearChildren(howToPicture);
+        switch (p.picture)
+        {
+            case "robots":
+                for (int i = 0; i < Characters.All.Length; i++)
+                {
+                    var img = Img(howToPicture, UiKit.Art(Characters.All[i].Art + "_idle"), Color.white);
+                    img.preserveAspect = true;
+                    Anchor(img.rectTransform, i / 3f, 0.1f, (i + 1) / 3f, 0.9f);
+                }
+                break;
+            case "blocks":
+                for (int i = 0; i < 5; i++)
+                {
+                    var b = Img(howToPicture, UiKit.BlockShape(), BlockColors[i]);
+                    b.type = Image.Type.Sliced;
+                    Anchor(b.rectTransform, 0.05f, 0.85f - i * 0.16f, 0.95f, 0.98f - i * 0.16f);
+                    var t = MakeText(b.rectTransform, Blocks.KindName(Blocks.Order[i]), 24, Color.white, TextAnchor.MiddleLeft, true);
+                    Anchor(t.rectTransform, 0, 0, 1, 1, 20, UiKit.BlockTabHeight, 0, 0);
+                }
+                break;
+            case "memory":
+                var back = Img(howToPicture, UiKit.RoundRect(12), UiKit.Hex("d8d0e8"));
+                back.type = Image.Type.Sliced;
+                Anchor(back.rectTransform, 0.05f, 0.55f, 0.95f, 0.62f);
+                var fill = Img(back.rectTransform, UiKit.RoundRect(12), UiKit.Hex("3fb8ff"));
+                fill.type = Image.Type.Sliced;
+                Anchor(fill.rectTransform, 0, 0, 0.6f, 1);
+                var m = MakeText(howToPicture, "メモリ　600 / 1000", 30, Ink, TextAnchor.MiddleCenter, true);
+                Anchor(m.rectTransform, 0, 0.64f, 1, 0.8f);
+                var sp = MakeText(howToPicture, "処理速度　ふつう", 34, UiKit.Hex("2a9a4a"), TextAnchor.MiddleCenter, true);
+                Anchor(sp.rectTransform, 0, 0.3f, 1, 0.5f);
+                break;
+            case "timeline":
+                var line = Img(howToPicture, null, UiKit.Hex("5ee05a"));
+                Anchor(line.rectTransform, 0.05f, 0.48f, 0.85f, 0.52f);
+                var head = Img(howToPicture, UiKit.Arrow(), UiKit.Hex("5ee05a"));
+                Anchor(head.rectTransform, 0.85f, 0.42f, 0.97f, 0.58f);
+                for (int i = 0; i < 3; i++)
+                {
+                    var face = Img(howToPicture, UiKit.Art(Characters.All[i].Art + "_idle", FaceCrop), Color.white);
+                    face.preserveAspect = true;
+                    Anchor(face.rectTransform, 0.1f + i * 0.28f, 0.55f, 0.28f + i * 0.28f, 0.75f);
+                }
+                var v = Img(howToPicture, UiKit.Art("bug"), Color.white);
+                v.preserveAspect = true;
+                Anchor(v.rectTransform, 0.45f, 0.25f, 0.62f, 0.45f);
+                break;
+            case "link":
+                var a = Img(howToPicture, UiKit.Art("red_cast"), Color.white);
+                a.preserveAspect = true;
+                Anchor(a.rectTransform, 0f, 0.1f, 0.5f, 0.9f);
+                var b2 = Img(howToPicture, UiKit.Art("blue_cast"), Color.white);
+                b2.preserveAspect = true;
+                Anchor(b2.rectTransform, 0.4f, 0.1f, 0.9f, 0.9f);
+                var ring = Img(howToPicture, UiKit.MagicCircle(), new Color(1f, 0.4f, 0.85f, 0.6f));
+                Anchor(ring.rectTransform, 0.1f, 0f, 0.8f, 0.25f);
+                break;
+        }
+    }
+
+    // ================= ハッキング（依頼主のパソコンにつなぐ） =================
+
+    static readonly string[] HackCode =
+    {
+        "using MagicCompile;",
+        "var target = Remote.Connect(\"{host}\");",
+        "target.Firewall.Bypass(key: 0x4D43);",
+        "Auth.Login(\"magical-compile\", token);",
+        "foreach (var file in target.Scan(\"/\"))",
+        "{",
+        "    if (file.IsInfected) Quarantine(file);",
+        "}",
+        "Memory.Dump(0x00A0, 0x0FFF);",
+        "Repair.Start(target.System);",
+        "Repair.Patch(\"kernel.sys\");",
+        "Repair.Restore(\"user/documents\");",
+        "Process.Kill(\"???.exe\");",
+    };
+
+    static readonly string[] ErrorMessages =
+    {
+        "ERROR 0x0BAD : アクセスが拒否されました",
+        "致命的なエラー：メモリが書きかえられています",
+        "警告：不明なプロセスが増殖しています",
+        "ERROR 0xDEAD : 修復プログラムが停止しました",
+        "接続が不安定です（パケット損失 87%）",
+        "ウイルスが修復をじゃましています！",
+    };
+
+    IEnumerator Connect(Request r)
+    {
+        connecting = true;
+        var screen = Img(requestLayer, null, UiKit.Hex("07060f"));
+        screen.raycastTarget = true;
+        var sc = screen.rectTransform;
+        sc.name = "Connect";
+        Fill(sc);
+        var grid = NewRect(sc, "Grid").gameObject.AddComponent<RawImage>();
+        Fill(grid.rectTransform);
+        grid.texture = CircuitTexture();
+        grid.uvRect = new Rect(0, 0, 1920f / 96f, 1080f / 96f);
+        grid.color = new Color(1, 1, 1, 0.25f);
+        grid.raycastTarget = false;
+
+        var head = MakeText(sc, r.Client + "さんのPC にリモート接続中", 40, Cyan, TextAnchor.MiddleLeft, true);
+        Anchor(head.rectTransform, 0.04f, 0.88f, 0.96f, 0.96f);
+        AddOutline(head, UiKit.Hex("0a3a48"), 3f);
+
+        // 左：プレイヤーが打ちこむコード
+        var codeBox = Img(sc, UiKit.RoundRect(14), new Color(0.03f, 0.05f, 0.08f, 0.92f));
+        codeBox.type = Image.Type.Sliced;
+        Anchor(codeBox.rectTransform, 0.04f, 0.08f, 0.62f, 0.86f);
+        var codeBar = Img(codeBox.rectTransform, UiKit.RoundRect(14), UiKit.Hex("1e2a3a"));
+        codeBar.type = Image.Type.Sliced;
+        Anchor(codeBar.rectTransform, 0, 1, 1, 1, 0, -44, 0, 0);
+        MakeText(codeBar.rectTransform, "　repair.cs ― あなたのコード", 22, UiKit.Hex("a8f4ff"), TextAnchor.MiddleLeft, true);
+        var code = MakeText(codeBox.rectTransform, "", 26, UiKit.Hex("5ee05a"), TextAnchor.UpperLeft, false);
+        code.supportRichText = true;
+        Anchor(code.rectTransform, 0, 0, 1, 1, 24, 16, -16, -60);
+
+        // 右：状態
+        var side = Img(sc, UiKit.RoundRect(14), new Color(0.03f, 0.05f, 0.08f, 0.92f));
+        side.type = Image.Type.Sliced;
+        Anchor(side.rectTransform, 0.65f, 0.4f, 0.96f, 0.86f);
+        var state = MakeText(side.rectTransform, "", 26, Color.white, TextAnchor.UpperLeft, true);
+        state.supportRichText = true;
+        Anchor(state.rectTransform, 0, 0, 1, 1, 24, 16, -16, -20);
+        var barLabel = MakeText(sc, "修復プログラム", 26, Cyan, TextAnchor.MiddleLeft, true);
+        Anchor(barLabel.rectTransform, 0.65f, 0.33f, 0.96f, 0.38f);
+        var barBack = Img(sc, UiKit.RoundRect(12), new Color(1, 1, 1, 0.15f));
+        barBack.type = Image.Type.Sliced;
+        Anchor(barBack.rectTransform, 0.65f, 0.29f, 0.96f, 0.32f);
+        var fill = Img(barBack.rectTransform, UiKit.RoundRect(12), Cyan);
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Horizontal;
+        Fill(fill.rectTransform);
+        var percent = MakeText(sc, "", 30, Color.white, TextAnchor.MiddleRight, true);
+        Anchor(percent.rectTransform, 0.65f, 0.33f, 0.96f, 0.38f);
+
+        string host = r.Id + "-pc";
+        var lines = new List<string>();
+        string typing = "";
+        int lineIndex = 0;
+        float progress = 0f;
+        var errorBoxes = new List<GameObject>();
+
+        // 1. プレイヤーがコードを打ちこんで、修復が進む
+        float t1 = 0f;
+        while (t1 < 3.0f)
+        {
+            t1 += Time.deltaTime;
+            if (lineIndex < HackCode.Length)
+            {
+                string full = HackCode[lineIndex].Replace("{host}", host);
+                int n = Mathf.Min(full.Length, typing.Length + Mathf.Max(1, (int)(Time.deltaTime * 70f)));
+                typing = full.Substring(0, n);
+                if (typing.Length >= full.Length) { lines.Add(full); typing = ""; lineIndex++; }
+            }
+            progress = Mathf.Min(0.72f, t1 / 3.0f * 0.72f);
+            fill.fillAmount = progress;
+            percent.text = (int)(progress * 100) + "%";
+            code.text = CodeView(lines, typing + ((int)(Time.time * 4) % 2 == 0 ? "_" : ""));
+            state.text = "接続　　　<color=#5ee05a>OK</color>\nファイアウォール　<color=#5ee05a>突破</color>\n認証　　　<color=#5ee05a>OK</color>\nスキャン　" + (int)(progress * 130) + "%\n修復　　　実行中…";
+            yield return null;
+        }
+
+        // 2. ウイルスが抵抗：エラーのウィンドウが次々に出て、コードがこわれていく
+        head.text = "ウイルスが抵抗しています！";
+        head.color = Magenta;
+        barLabel.text = "修復プログラム　<color=#ff4fd8>停止</color>";
+        barLabel.supportRichText = true;
+        fill.color = Magenta;
+        float t2 = 0f, spawn = 0f;
+        while (t2 < 2.4f)
+        {
+            t2 += Time.deltaTime;
+            spawn -= Time.deltaTime;
+            if (spawn <= 0f)
+            {
+                spawn = Mathf.Lerp(0.35f, 0.08f, t2 / 2.4f);
+                errorBoxes.Add(ErrorWindow(sc, r));
+                StartCoroutine(Noise(0.2f, 0.35f + t2 * 0.15f));
+                // コードの行をこわす
+                if (lines.Count > 0)
+                {
+                    int k = Random.Range(0, lines.Count);
+                    lines[k] = "<color=#ff4f6a>" + Garble(StripTags(lines[k])) + "</color>";
+                }
+            }
+            progress = Mathf.Max(0f, progress - Time.deltaTime * 0.25f + Random.Range(-0.02f, 0.02f));
+            fill.fillAmount = progress;
+            percent.text = "<color=#ff4fd8>" + (int)(progress * 100) + "%</color>";
+            percent.supportRichText = true;
+            code.text = CodeView(lines, Garble("Repair.Resume();"));
+            state.text = "接続　　　<color=#ffd84a>不安定</color>\nファイアウォール　<color=#ff4f6a>書きかえ</color>\n認証　　　<color=#ff4f6a>エラー</color>\nウイルス　<color=#ff4f6a>" + r.Enemies.Length + " 件が攻撃中</color>\n修復　　　<color=#ff4f6a>停止</color>";
+            sc.anchoredPosition = Random.insideUnitCircle * (4f + t2 * 6f);   // 画面がゆれる
+            yield return null;
+        }
+        sc.anchoredPosition = Vector2.zero;
+
+        // 3. ウイルスの姿があらわれて、戦闘へ
+        var flash = Img(sc, null, new Color(0.7f, 0.02f, 0.15f, 0.85f)).rectTransform;
+        Anchor(flash, 0, 0.36f, 1, 0.64f);
+        var ft = MakeText(flash, "VIRUS ATTACK", 110, Color.white, TextAnchor.MiddleCenter, true);
+        ft.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(ft, Color.black, 5f);
+        for (int k = 0; k < r.Enemies.Length; k++)
+        {
+            var v = Img(sc, UiKit.Art(r.Enemies[k].Art), new Color(1, 1, 1, 0.9f));
+            v.preserveAspect = true;
+            float w = 0.7f / r.Enemies.Length;
+            Anchor(v.rectTransform, 0.15f + k * w, 0.64f, 0.15f + (k + 1) * w, 0.86f);
+        }
+        StartCoroutine(Noise(0.7f, 0.8f));
+        for (int i = 0; i < 8; i++)
+        {
+            flash.gameObject.SetActive(i % 2 == 0 || i > 4);
+            flash.anchoredPosition = new Vector2(Random.Range(-40f, 40f), 0);
+            yield return new WaitForSeconds(0.08f);
+        }
+        yield return new WaitForSeconds(0.5f);
+
+        Destroy(screen.gameObject);
+        connecting = false;
+        requestLayer.gameObject.SetActive(false);
+        battleLayer.gameObject.SetActive(true);
+        NewBattle();
+    }
+
+    // 下の 16 行だけ見せる（行番号つき）
+    static string CodeView(List<string> lines, string typing)
+    {
+        var sb = new System.Text.StringBuilder();
+        int start = Mathf.Max(0, lines.Count + 1 - 16);
+        for (int i = start; i < lines.Count; i++) sb.Append("<color=#4a5a6a>").Append((i + 1).ToString("00")).Append("</color>  ").Append(lines[i]).Append('\n');
+        sb.Append("<color=#4a5a6a>").Append((lines.Count + 1).ToString("00")).Append("</color>  ").Append(typing);
+        return sb.ToString();
+    }
+
+    static string StripTags(string s) => System.Text.RegularExpressions.Regex.Replace(s, "<.*?>", "");
+
+    // 文字をこわす（ところどころ記号にする）
+    static string Garble(string s)
+    {
+        const string junk = "#$%&@!?*01■□";
+        var c = s.ToCharArray();
+        for (int i = 0; i < c.Length; i++)
+            if (Random.value < 0.35f) c[i] = junk[Random.Range(0, junk.Length)];
+        return new string(c).Replace("<", "＜").Replace(">", "＞");
+    }
+
+    // 赤いエラーのウィンドウ
+    GameObject ErrorWindow(RectTransform parent, Request r)
+    {
+        var box = Img(parent, UiKit.RoundRect(10), new Color(0.96f, 0.94f, 0.96f, 0.97f));
+        box.type = Image.Type.Sliced;
+        var rt = box.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(Random.Range(0.15f, 0.85f), Random.Range(0.2f, 0.85f));
+        rt.sizeDelta = new Vector2(Random.Range(460f, 560f), 150);
+        var bar = Img(rt, UiKit.RoundRect(10), UiKit.Hex("d81e3c"));
+        bar.type = Image.Type.Sliced;
+        Anchor(bar.rectTransform, 0, 1, 1, 1, 0, -40, 0, 0);
+        MakeText(bar.rectTransform, "　！ ERROR", 22, Color.white, TextAnchor.MiddleLeft, true);
+        MakeText(bar.rectTransform, "×　", 24, Color.white, TextAnchor.MiddleRight, true);
+        var msg = MakeText(rt, ErrorMessages[Random.Range(0, ErrorMessages.Length)], 24, Ink, TextAnchor.MiddleCenter, true);
+        Anchor(msg.rectTransform, 0, 0, 1, 1, 16, 8, -16, -44);
+        var virus = Img(rt, UiKit.Art(r.Enemies[Random.Range(0, r.Enemies.Length)].Art), Color.white);
+        virus.preserveAspect = true;
+        Anchor(virus.rectTransform, 0, 0, 0, 0, 8, 8, 64, 64);
+        return box.gameObject;
+    }
+}

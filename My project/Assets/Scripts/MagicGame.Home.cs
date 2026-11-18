@@ -190,7 +190,7 @@ public partial class MagicGame
         Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
     }
 
-    static string TraitText(CharacterInfo c) =>
+    static string TraitText(RobotInfo c) =>
         c.Trait == Trait.FireUp ? "炎属性 火力UP" : c.Trait == Trait.IceUp ? "氷属性 火力UP" : "メモリ容量UP";
 
     void ShowCharacters()

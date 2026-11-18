@@ -225,5 +225,13 @@ public static class ArtData
             "LjbWXFiIDuZAptpJHJAWIqdSzKw/f95hWnOlf5EO7WY0+/rNRKIqFD2nUlRrRmyO0vHKtBJluldiWnOEk3UgF29OsqEyD4ST6QZrVR2gSMXvAxHgyGdCOnjy" +
             "pqK0I+y1sJxJO84Tnwxy5gEiHqfyuVDKnapZvYZOHafE5EVJ0dl5LFdpIj7hl+o10Rytz7OjfxkpOTAcB0a6ieQJS7S99vN9f57/A6rkc5xY3sdjAAAAAElF" +
             "TkSuQmCC" },
+        { "shifter",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACKUlEQVR42tVXMUvDUBD+EvIDgjhH5wQSZ3XoZKF0yKzg2KX/oEIHQX+BLh0F9w5BdBNpF6e2" +
+            "kM7aWaQ/QHgOevHeM2kutqV4UEqT69139+67uwcIxfdCtQ5dsUF17CuJYd8L1f69UlIQtsRgevgBAEgPPxZG53uhcntjAIDbG4syYWPDUgpgOptYwcABALS3" +
+            "41KDe3dnAIB5K8J0NrHK9B0Jyi8QoarFsiKTOgcAq2ox1uImrt/62bOD01SL/rGfiJ2LAVDEVIxcgoEDKjyeAcqc+AjIifknzgKpECC/Fak8e9yPzZ2YNPuL" +
+            "cxOIac/tjbXntumkjOvLNDN+VATCMiMlqj32k+zMiYZc+DsyTGdvZmHeilCLmwCAUeNCY4pV1L/Nasdtqls+CTQAw7r++uABv9hhUlsrQl4svhcqzfkfZFj/" +
+            "ATFqXAAF9HSqGiajwyKF78zw/rB0JzQjAwDcFCjQUT1gxQC+IyvLzMqH0can4brFKaJhezvGskzQaGj4IEYsbESXWy+aoc77LtLXMYKdKPvOGpPxfN48/2lG" +
+            "Sbe4EeX1+2DgYDqbWL4XKg6i874rjpoAuEk3s5U3NR1aNnhrLRqjZkYIFI920VLjtyLF23ZuK84bn3mOJQAo+kXjuNJCIs2Am3SrLyRl6QOADr5WsqOnq1y9" +
+            "2Hlez0rG98G8qcbpRTpSELbUOWfKdDax6MN/F21CK7sZSRoT8fzf3Iw2fjmtBGIdup/cSHIHSS2g6AAAAABJRU5ErkJggg==" },
     };
 }

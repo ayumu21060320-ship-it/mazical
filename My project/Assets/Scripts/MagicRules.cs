@@ -24,7 +24,8 @@ namespace MagicBattle
     //   Lock:       ロック。攻撃した味方の次のターンのメモリ容量を 30% 減らす
     //   Scatter:    分散。「1体」の魔法は半分しか効かないが、「全体」の魔法は 1.5 倍効く
     //   Firewall:   ファイアウォール。属性の無い魔法（無）以外は効きにくい（炎・氷に耐性）
-    public enum VirusAbility { None, Regen, AllAttack, Lock, Scatter, Firewall }
+    //   Shift:      切りかえ。ターンが変わるたびに弱点と耐性（炎⇔氷）が入れかわる
+    public enum VirusAbility { None, Regen, AllAttack, Lock, Scatter, Firewall, Shift }
 
     // 並べたブロック 1 つ。Value は選んでいる選択肢の番号
     public class Block
@@ -52,6 +53,7 @@ namespace MagicBattle
         public static readonly string[] Conditions =
         {
             "敵の弱点が 炎", "敵の弱点が 氷", "敵の弱点が 無", "敵が 2体以上", "自分の HP が半分以下",
+            "敵の HP が半分以下", "敵の特性が 分散",
         };
         public static readonly int[] RepeatValues = { 2, 3, 4 };
 
@@ -351,6 +353,8 @@ namespace MagicBattle
                 case 2: return target != null && Array.IndexOf(target.Weak, Element.None) >= 0;
                 case 3: return enemyCount >= 2;
                 case 4: return caster != null && caster.Hp * 2 <= caster.MaxHp;
+                case 5: return target != null && target.Hp * 2 <= target.MaxHp;
+                case 6: return target != null && target.Ability == VirusAbility.Scatter;
                 default: return false;
             }
         }
@@ -451,6 +455,7 @@ namespace MagicBattle
                 case VirusAbility.Lock: return "ロック";
                 case VirusAbility.Scatter: return "分散";
                 case VirusAbility.Firewall: return "ファイアウォール";
+                case VirusAbility.Shift: return "切りかえ";
                 default: return "なし";
             }
         }
@@ -464,6 +469,7 @@ namespace MagicBattle
                 case VirusAbility.Lock: return "攻撃した味方の、次のターンのメモリ容量を 30% 減らす";
                 case VirusAbility.Scatter: return "「1体」の魔法は半分しか効かない。「全体」の魔法は 1.5 倍効く";
                 case VirusAbility.Firewall: return "炎も氷も効きにくい。属性「無」の魔法でこわそう";
+                case VirusAbility.Shift: return "ターンが変わるたびに弱点と耐性（炎⇔氷）が入れかわる。「もし」で属性を切りかえよう";
                 default: return "特別な力は無い";
             }
         }
@@ -569,15 +575,17 @@ namespace MagicBattle
             "いちばんよく見るウイルス。プログラムをかじって、文字をめちゃくちゃにする");
         public static readonly EnemySpec Worm = new EnemySpec("ワーム", "ワ", "worm", 400, 35, 32f, E(Element.Ice), E(Element.Fire), VirusAbility.Regen,
             "ファイルを勝手にコピーして増えていく。早めに倒さないと回復してしまう");
-        public static readonly EnemySpec Spam = new EnemySpec("スパム", "ス", "spam", 220, 25, 44f, E(Element.Fire), E(), VirusAbility.Scatter,
+        public static readonly EnemySpec Spam = new EnemySpec("スパム", "ス", "spam", 220, 30, 44f, E(Element.Fire), E(), VirusAbility.Scatter,
             "迷惑メールのウイルス。すばしっこくて、まとめて攻撃しないと効きにくい");
-        public static readonly EnemySpec Ransom = new EnemySpec("ランサム", "ラ", "ransom", 500, 40, 26f, E(Element.Ice), E(Element.Fire), VirusAbility.Lock,
+        public static readonly EnemySpec Ransom = new EnemySpec("ランサム", "ラ", "ransom", 500, 48, 26f, E(Element.Ice), E(Element.Fire), VirusAbility.Lock,
             "データにカギをかけて人質にする。攻撃された味方はメモリが減ってしまう");
-        public static readonly EnemySpec Troy = new EnemySpec("トロイ", "ト", "troy", 700, 45, 22f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.AllAttack,
+        public static readonly EnemySpec Troy = new EnemySpec("トロイ", "ト", "troy", 700, 66, 22f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.AllAttack,
             "安全なプログラムのふりをして入りこむ大物。炎も氷も効きにくく、全員を攻撃してくる");
         public static readonly EnemySpec Rootkit = new EnemySpec("ルートキット", "ル", "rootkit", 1100, 50, 24f, E(Element.None), E(Element.Fire, Element.Ice), VirusAbility.Regen,
             "パソコンのいちばん奥にひそむ親玉。炎も氷も効きにくく、ターンごとに回復する。強敵戦の最後に出てくる");
-        public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Troy, Rootkit };
+        public static readonly EnemySpec Shifter = new EnemySpec("シフター", "シ", "shifter", 450, 62, 28f, E(Element.Fire), E(Element.Ice), VirusAbility.Shift,
+            "炎と氷の2つの顔を持つウイルス。ターンごとに弱点が入れかわるので、同じ魔法を打ち続けると効かなくなる");
+        public static readonly EnemySpec[] All = { Bug, Worm, Spam, Ransom, Shifter, Troy, Rootkit };
     }
 
     // レベル：経験値（EXP）がたまると上がる。Lv が 1 上がるごとにメモリ容量 +100・HP +20
@@ -605,6 +613,8 @@ namespace MagicBattle
     {
         public string Id, Client, Title, Message;
         public string Thanks;        // 駆除したあとのお礼の言葉
+        public string Hint = "";     // 攻略のヒント（依頼カードと戦闘のはじめに出す）
+        public int ParTurns = 3;     // このターン数以内で、だれも倒れずに勝てば S ランク
         public int Xp = 100;         // もらえる経験値（2回目からは半分）
         public int Stars;            // むずかしさ（★の数）
         public EnemySpec[] Enemies;  // 最初に出てくるウイルス
@@ -614,54 +624,71 @@ namespace MagicBattle
 
     public static class Requests
     {
+        // 依頼ごとの HP（工夫したプログラムなら勝てて、同じ魔法を押すだけだと苦戦するように調整した値）
+        public static int BugHp1 = 250, BugHp3 = 450, WormHp2 = 420, SpamHp = 260, RansomHp = 560, ShifterHp = 600, TroyHp = 900, RootkitHp = 1000;
+
         static EnemySpec Bug(int hp = 400) => Viruses.Bug.WithHp(hp);
         static EnemySpec Worm(int hp = 400) => Viruses.Worm.WithHp(hp);
         static EnemySpec Spam(int hp = 220) => Viruses.Spam.WithHp(hp);
         static EnemySpec Ransom(int hp = 500) => Viruses.Ransom.WithHp(hp);
         static EnemySpec Troy(int hp = 700) => Viruses.Troy.WithHp(hp);
         static EnemySpec Rootkit(int hp = 1100) => Viruses.Rootkit.WithHp(hp);
+        static EnemySpec Shifter(int hp = 450) => Viruses.Shifter.WithHp(hp);
 
         public static readonly Request[] All =
         {
             new Request
             {
-                Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1, Xp = 80,
+                Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1, Xp = 80, ParTurns = 2,
                 Thanks = "文字が元にもどった！ これで宿題が出せるよ。ほんとうにありがとう！",
                 Message = "明日出す宿題のファイルを開いたら、文字がめちゃくちゃに…。虫みたいなのが画面をはってる！",
-                Enemies = new[] { Bug(250), Bug(250) },
+                Hint = "バグは炎が弱点。属性を「炎」にして打ってみよう",
+                Enemies = new[] { Bug(BugHp1), Bug(BugHp1) },
             },
             new Request
             {
-                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2, Xp = 150,
+                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2, Xp = 150, ParTurns = 3,
                 Thanks = "旅行の写真、ぜんぶ無事だった！ にょろにょろもいなくなったよ、ありがとう！",
                 Message = "旅行の写真がどんどんコピーされて、パソコンがパンパン！ 紫のにょろにょろが増えてるの",
-                Enemies = new[] { Worm(350), Spam(), Worm(350) },
+                Hint = "ワームは氷が弱点で、ほうっておくと回復する。すばやいスパムは「全体」の魔法でまとめて",
+                Enemies = new[] { Worm(WormHp2), Spam(SpamHp), Worm(WormHp2) },
             },
             new Request
             {
-                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2, Xp = 150,
+                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2, Xp = 150, ParTurns = 4,
                 Thanks = "セーブデータのカギが外れた！ 100時間のデータが助かったよ、神！",
                 Message = "セーブデータを開こうとしたら「返してほしければ…」って出てきた！ 金色のカギのやつが2体いる",
-                Enemies = new[] { Ransom(450), Spam(200), Ransom(450) },
+                Hint = "ランサムは氷が弱点。攻撃されるとメモリが減るので、メモリに余裕のあるプログラムにしておこう",
+                Enemies = new[] { Ransom(RansomHp), Spam(SpamHp), Ransom(RansomHp) },
             },
             new Request
             {
-                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3, Xp = 250,
+                Id = "r5", Client = "みき", Title = "絵のデータの色がおかしい！", Stars = 3, Xp = 220, ParTurns = 4,
+                Thanks = "絵の色がもとにもどった！ 赤と青がくるくる変わるの、もう見たくないよ…ありがとう！",
+                Message = "描いた絵が、赤くなったり青くなったりして止まらないの。半分赤くて半分青いウイルスがいる！",
+                Hint = "シフターはターンごとに弱点が炎⇔氷で入れかわる。「もし 敵の弱点が炎 なら…」で属性を切りかえよう（装備で「もし」をはめる）",
+                Enemies = new[] { Shifter(ShifterHp), Bug(BugHp3), Shifter(ShifterHp) },
+            },
+            new Request
+            {
+                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3, Xp = 250, ParTurns = 5,
                 Thanks = "成績データがもどりました。たいへん助かりました。きみたちは学校の救世主ですね",
                 Message = "職員室のパソコンに大きな一つ目のウイルスが…。成績のデータを人質にとられています。至急たのみます",
-                Enemies = new[] { Bug(), Worm(), Troy() },
+                Hint = "トロイは炎も氷も効きにくく、全員を攻撃してくる。属性「無」が弱点。ほかのウイルスとは「もし」で打ち分けよう",
+                Enemies = new[] { Bug(BugHp3), Shifter(ShifterHp), Troy(TroyHp) },
             },
             new Request
             {
-                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3, Xp = 400,
+                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3, Xp = 400, ParTurns = 10,
                 Thanks = "親玉まで倒してくれたのか…！ 店のパソコンがぜんぶ動いてる。きみたちは本物だ！",
                 Message = "店じゅうのパソコンがウイルスの巣に…！ 倒しても倒しても奥から出てくる。いちばん奥に親玉がいるはずだ",
-                Enemies = new[] { Bug(), Spam(), Bug() },
+                Hint = "3回の連戦。HP は回復しない。ウェーブごとに相手に合わせてプログラムを組み直そう。親玉ルートキットは「無」が弱点",
+                Enemies = new[] { Bug(BugHp3), Spam(SpamHp), Bug(BugHp3) },
                 Waves = new[]
                 {
-                    new[] { Bug(), Spam(), Bug() },
-                    new[] { Worm(), Ransom(), Worm() },
-                    new[] { Spam(), Rootkit(), Spam() },
+                    new[] { Bug(BugHp3), Spam(SpamHp), Bug(BugHp3) },
+                    new[] { Worm(WormHp2), Shifter(ShifterHp), Ransom(RansomHp) },
+                    new[] { Spam(SpamHp), Rootkit(RootkitHp), Spam(SpamHp) },
                 },
             },
         };
@@ -860,6 +887,11 @@ namespace MagicBattle
             }
             foreach (var e in Enemies)
             {
+                if (e.Alive && e.Ability == VirusAbility.Shift)
+                {
+                    var w = e.Weak; e.Weak = e.Resist; e.Resist = w;
+                    notes.Add(e.Name + "の弱点が " + (e.Weak.Length > 0 ? Blocks.Label(BlockKind.Element, (int)e.Weak[0]) : "なし") + " に入れかわった！");
+                }
                 if (e.Alive && e.Ability == VirusAbility.Regen && e.Hp < e.MaxHp)
                 {
                     int h = Math.Min(e.MaxHp - e.Hp, (int)(e.MaxHp * 0.15f));

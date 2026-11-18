@@ -11,8 +11,9 @@ Unity プロジェクトは `My project/` フォルダ。Git に入れるのは�
 
 ## コードの場所
 - `My project/Assets/Scripts/MagicRules.cs` … ルール（ブロック・メモリ・処理速度・ダメージ・タイムラインの戦闘）。Unity に依存しない C#
-- `My project/Assets/Scripts/PixelArt.cs` … キャラクターとウイルスのドット絵（文字の並び）
-- `My project/Assets/Scripts/MagicGame.cs` … 画面と操作。シーンを再生すると自動で起動する（シーンに置く必要なし）
+- `My project/Assets/Scripts/ArtData.cs` … キャラクター・ウイルスのドット絵（PNG を文字にしたもの）
+- `My project/Assets/Scripts/UiKit.cs` … 画面の部品の形（角の丸い四角・斜めの帯・ブロック・魔法陣など）をコードで作る
+- `My project/Assets/Scripts/MagicGame.cs` … タイトル・戦闘・プログラムの画面と操作。シーンを再生すると自動で起動する（シーンに置く必要なし）
 - ルールと数値は `docs/決めたこと.md` の「ゲームのルール」が正。コードを変えたらそちらも合わせる
 
 ## 毎回やること

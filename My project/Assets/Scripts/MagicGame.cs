@@ -5,6 +5,7 @@
 //                   ブロックの白い枠をクリックすると中身（炎・氷…、数）が変わる
 // 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
 // キャラクターはドット絵（PixelArt.cs）。背景は電子回路の方眼をコードで描いている
+// アニメーション: 待機中のゆれ・まばたき、攻撃の踏み込み、魔法の弾、当たったときのゆれと火花、ウイルスが消える演出
 
 using System.Collections;
 using System.Collections.Generic;
@@ -41,12 +42,15 @@ public class MagicGame : MonoBehaviour
     Phase phase;
     readonly Dictionary<Unit, List<Block>> drafts = new Dictionary<Unit, List<Block>>(); // 組みかけのコード
     Unit editing;          // プログラム画面で組んでいるロボット
-    float waitTimer;       // 行動のあと、少し止める
+    bool busy;             // 行動のアニメーション中はタイムラインを止める
+    int flying;            // 飛んでいる魔法の弾の数
     const float TimelineSpeed = 1.0f;
 
     Font font;
     Canvas canvas;
     RectTransform root;
+    RectTransform cardLayer; // キャラクターのカードを置く場所（プログラム画面より下）
+    RectTransform effects;  // 魔法の弾・火花を置く場所（バトルの上、プログラム画面の下）
 
     // バトル画面
     Text turnText, messageText, logText;
@@ -69,6 +73,14 @@ public class MagicGame : MonoBehaviour
         public Outline Frame;   // ふちどり（ねらう敵は黄色、行動中は白）
         public Image HpFill;
         public Text HpText, InfoText;
+        public RectTransform Art;
+        public Image ArtImage;
+        public Sprite Normal, Blink;  // ふだんの絵と、目を閉じた絵（味方だけ）
+        public Vector2 Offset;        // 踏み込み・ゆれで動かす量
+        public float Phase;           // 待機のゆれをキャラごとにずらす
+        public float BlinkTimer;
+        public int ShownHp;           // 画面に出している HP（弾が当たったときに減らす）
+        public bool Dying, Dead;
     }
 
     void Start()
@@ -93,6 +105,10 @@ public class MagicGame : MonoBehaviour
 
     void NewBattle()
     {
+        StopAllCoroutines();
+        for (int i = effects.childCount - 1; i >= 0; i--) Destroy(effects.GetChild(i).gameObject);
+        busy = false;
+        flying = 0;
         battle = new Battle(System.Environment.TickCount);
         drafts.Clear();
         foreach (var a in battle.Allies) drafts[a] = new List<Block>();
@@ -112,10 +128,10 @@ public class MagicGame : MonoBehaviour
     {
         if (phase == Phase.Running)
         {
-            if (waitTimer > 0f) waitTimer -= Time.deltaTime;
-            else StepBattle(Time.deltaTime);
+            if (!busy) StepBattle(Time.deltaTime);
         }
         UpdateTimeline();
+        AnimateCards();
     }
 
     void StepBattle(float dt)
@@ -125,15 +141,7 @@ public class MagicGame : MonoBehaviour
         {
             var r = battle.Act(ready);
             if (!string.IsNullOrEmpty(r.Text)) AddLog(r.Text);
-            StartCoroutine(Flash(cards[ready].Frame));
-            foreach (var h in r.Hits) ShowPopup(h);
-            waitTimer = 0.8f;
-            if (battle.Won || battle.Lost)
-            {
-                phase = Phase.Finished;
-                AddLog(battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…");
-            }
-            RefreshBattle();
+            StartCoroutine(PlayAction(r));
             return;
         }
         if (battle.TurnOver)
@@ -154,7 +162,7 @@ public class MagicGame : MonoBehaviour
         foreach (var kv in icons)
         {
             var u = kv.Key;
-            kv.Value.gameObject.SetActive(u.Alive);
+            kv.Value.gameObject.SetActive(cards.TryGetValue(u, out var cd) ? !cd.Dead : u.Alive);
             float t = Mathf.Clamp01(u.Gauge / Battle.GaugeLength);
             var p = kv.Value.anchoredPosition;
             p.x = t * w;
@@ -253,8 +261,8 @@ public class MagicGame : MonoBehaviour
         {
             var u = kv.Key;
             var c = kv.Value;
-            c.HpFill.fillAmount = (float)u.Hp / u.MaxHp;
-            c.HpText.text = "HP " + u.Hp + " / " + u.MaxHp;
+            c.HpFill.fillAmount = (float)c.ShownHp / u.MaxHp;
+            c.HpText.text = "HP " + c.ShownHp + " / " + u.MaxHp;
             if (u.IsAlly)
             {
                 c.InfoText.text = u.TraitName() + "\n"
@@ -266,7 +274,7 @@ public class MagicGame : MonoBehaviour
                                 + "\n攻撃力：" + u.Attack + (u == target ? "\n◆ ねらう敵" : "");
                 c.Frame.effectColor = u == target ? TargetColor : new Color(0, 0, 0, 0);
             }
-            c.Rect.GetComponent<CanvasGroup>().alpha = u.Alive ? 1f : 0.35f;
+            c.Rect.GetComponent<CanvasGroup>().alpha = c.ShownHp > 0 ? 1f : 0.35f;
         }
         programButton.interactable = phase == Phase.Planning;
         startButton.interactable = phase == Phase.Planning;
@@ -331,6 +339,207 @@ public class MagicGame : MonoBehaviour
         RefreshBattle();
     }
 
+    // 待機中のゆれ・まばたき
+    void AnimateCards()
+    {
+        float t = Time.time;
+        foreach (var kv in cards)
+        {
+            var u = kv.Key;
+            var c = kv.Value;
+            if (c.Dead || c.Dying) continue;
+            float bob = u.IsAlly ? Mathf.Sin(t * 2.2f + c.Phase) * 4f : Mathf.Sin(t * 3.0f + c.Phase) * 3f;
+            c.Art.anchoredPosition = new Vector2(0, bob) + c.Offset;
+            if (!u.IsAlly)
+            {
+                float k = 1f + Mathf.Sin(t * 2.5f + c.Phase) * 0.05f; // ウイルスはぷよぷよ
+                c.Art.localScale = new Vector3(k, 2f - k, 1f);
+            }
+            else if (c.Blink != null)
+            {
+                c.BlinkTimer -= Time.deltaTime;
+                if (c.BlinkTimer < -0.12f) { c.BlinkTimer = Random.Range(2f, 5f); c.ArtImage.sprite = c.Normal; }
+                else if (c.BlinkTimer < 0f) c.ArtImage.sprite = c.Blink;
+            }
+        }
+    }
+
+    static Color ElementColor(Element e) =>
+        e == Element.Fire ? new Color(1f, 0.5f, 0.15f) : e == Element.Ice ? new Color(0.45f, 0.9f, 1f) : new Color(0.9f, 0.85f, 1f);
+
+    // 1 回の行動のアニメーション。終わるまでタイムラインを止める
+    IEnumerator PlayAction(ActionResult r)
+    {
+        busy = true;
+        var actor = cards[r.Actor];
+        StartCoroutine(Flash(actor.Frame));
+        RectTransform icon;
+        if (icons.TryGetValue(r.Actor, out icon)) StartCoroutine(Bump(icon));
+        yield return Lunge(actor, r.Actor.IsAlly ? 1f : -1f);
+
+        if (r.Actor.IsAlly && r.Actor.Spell != null)
+        {
+            var s = r.Actor.Spell;
+            var color = ElementColor(s.Element);
+            bool blast = s.HasEffect && s.Effect == Effect.Blast;
+            foreach (var h in r.Hits)
+            {
+                if (h.Heal) continue;
+                StartCoroutine(Projectile(actor, h, color, blast, s.HasEffect && s.Effect == Effect.Slow));
+                yield return new WaitForSeconds(0.12f);
+            }
+            while (flying > 0) yield return null;
+            foreach (var h in r.Hits)
+                if (h.Heal) Impact(h, new Color(0.5f, 1f, 0.5f), false);
+        }
+        else
+        {
+            foreach (var h in r.Hits) Impact(h, new Color(0.8f, 0.3f, 1f), false); // ウイルスの侵食
+        }
+
+        yield return new WaitForSeconds(0.45f);
+        busy = false;
+        if (phase == Phase.Running && (battle.Won || battle.Lost))
+        {
+            phase = Phase.Finished;
+            AddLog(battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…");
+        }
+        RefreshBattle();
+    }
+
+    // 相手の方へ踏み込んで戻る
+    IEnumerator Lunge(UnitCard c, float dir)
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.12f) { c.Offset = new Vector2(dir * 45f * t, 6f * t); yield return null; }
+        for (float t = 1f; t > 0f; t -= Time.deltaTime / 0.18f) { c.Offset = new Vector2(dir * 45f * t, 6f * t); yield return null; }
+        c.Offset = Vector2.zero;
+    }
+
+    IEnumerator Bump(RectTransform icon)
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.3f)
+        {
+            if (icon == null) yield break;
+            icon.localScale = Vector3.one * (1f + 0.4f * Mathf.Sin(t * Mathf.PI));
+            yield return null;
+        }
+        if (icon != null) icon.localScale = Vector3.one;
+    }
+
+    // 魔法の弾。山なりに飛んで、当たったら Impact
+    IEnumerator Projectile(UnitCard from, Hit h, Color color, bool big, bool slow)
+    {
+        flying++;
+        var orb = Box(effects, color, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        orb.sizeDelta = Vector2.one * (big ? 40f : 28f);
+        orb.GetComponent<Image>().raycastTarget = false;
+        var core = Box(orb, Color.white, new Vector2(0.3f, 0.3f), new Vector2(0.7f, 0.7f));
+        core.GetComponent<Image>().raycastTarget = false;
+        Vector3 a = from.Art.position;
+        UnitCard tc;
+        Vector3 b = cards.TryGetValue(h.Target, out tc) ? tc.Art.position : a;
+        float trailTimer = 0f;
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.35f)
+        {
+            var p = Vector3.Lerp(a, b, t);
+            p.y += Mathf.Sin(t * Mathf.PI) * 80f;
+            orb.position = p;
+            orb.localRotation = Quaternion.Euler(0, 0, t * 360f);
+            trailTimer -= Time.deltaTime;
+            if (trailTimer <= 0f) { trailTimer = 0.03f; Burst(p, color, 1, 10f, 40f); } // 尾
+            yield return null;
+        }
+        Destroy(orb.gameObject);
+        Impact(h, color, big);
+        if (slow && tc != null) Burst(b, new Color(0.6f, 0.6f, 1f), 6, 12f, 120f);
+        flying--;
+    }
+
+    // 当たった（回復した）ときの演出と、画面の HP の更新
+    void Impact(Hit h, Color color, bool big)
+    {
+        if (!cards.TryGetValue(h.Target, out var c)) return;
+        c.ShownHp = Mathf.Clamp(c.ShownHp + (h.Heal ? h.Amount : -h.Amount), 0, h.Target.MaxHp);
+        ShowPopup(h);
+        Burst(c.Art.position, color, big ? 18 : 9, big ? 16f : 12f, big ? 420f : 260f);
+        if (!h.Heal)
+        {
+            StartCoroutine(Shake(c));
+            StartCoroutine(Tint(c.ArtImage, new Color(1f, 0.45f, 0.45f)));
+        }
+        else StartCoroutine(Tint(c.ArtImage, new Color(0.6f, 1f, 0.6f)));
+        if (c.ShownHp <= 0 && !c.Dying && !c.Dead) StartCoroutine(Die(c));
+        RefreshBattle();
+    }
+
+    IEnumerator Shake(UnitCard c)
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.3f)
+        {
+            c.Offset = Random.insideUnitCircle * 10f * (1f - t);
+            yield return null;
+        }
+        c.Offset = Vector2.zero;
+    }
+
+    IEnumerator Tint(Image img, Color color)
+    {
+        img.color = color;
+        yield return new WaitForSeconds(0.15f);
+        if (img != null) img.color = Color.white;
+    }
+
+    // 倒れる演出：ウイルスはノイズのようにちらついて消える。ロボットは倒れて暗くなる
+    IEnumerator Die(UnitCard c)
+    {
+        c.Dying = true;
+        yield return new WaitForSeconds(0.2f);
+        for (int i = 0; i < 10; i++)
+        {
+            if (c.Art == null) yield break;
+            c.ArtImage.enabled = i % 2 == 0;
+            c.Art.anchoredPosition = new Vector2(Random.Range(-12f, 12f), 0);
+            c.Art.localScale = new Vector3(1f + Random.Range(-0.2f, 0.3f), 1f - i * 0.06f, 1f);
+            yield return new WaitForSeconds(0.05f);
+        }
+        if (c.Art == null) yield break;
+        c.ArtImage.enabled = true;
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.2f)
+        {
+            c.Art.localScale = new Vector3(1f + t, Mathf.Max(0.02f, 0.4f * (1f - t)), 1f);
+            yield return null;
+        }
+        c.ArtImage.enabled = false;
+        c.Dying = false;
+        c.Dead = true;
+    }
+
+    // 火花（小さな四角が飛び散って消える）
+    void Burst(Vector3 pos, Color color, int count, float size, float speed)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            var sq = Box(effects, color, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            sq.sizeDelta = Vector2.one * size * Random.Range(0.6f, 1.2f);
+            sq.position = pos;
+            sq.GetComponent<Image>().raycastTarget = false;
+            StartCoroutine(Spark(sq, Random.insideUnitCircle.normalized * speed * Random.Range(0.4f, 1f)));
+        }
+    }
+
+    IEnumerator Spark(RectTransform sq, Vector2 vel)
+    {
+        var img = sq.GetComponent<Image>();
+        var c0 = img.color;
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.45f)
+        {
+            sq.position += (Vector3)(vel * Time.deltaTime * (1f - t));
+            img.color = new Color(c0.r, c0.g, c0.b, 1f - t);
+            yield return null;
+        }
+        Destroy(sq.gameObject);
+    }
+
     void ShowPopup(Hit h)
     {
         if (!cards.TryGetValue(h.Target, out var card)) return;
@@ -388,6 +597,10 @@ public class MagicGame : MonoBehaviour
         raw.uvRect = new Rect(0, 0, 1920f / 64f, 1080f / 64f);
         raw.raycastTarget = false;
 
+        cardLayer = Box(root, new Color(0, 0, 0, 0), Vector2.zero, Vector2.one);
+        cardLayer.name = "Cards";
+        cardLayer.GetComponent<Image>().raycastTarget = false;
+
         // 上の帯
         var header = Box(root, new Color(0, 0, 0, 0.4f), new Vector2(0, 0.93f), new Vector2(1, 1));
         turnText = MakeText(header, "", 34, TextAnchor.MiddleLeft);
@@ -420,6 +633,9 @@ public class MagicGame : MonoBehaviour
         retryButton = MakeButton(bottom, "もう一度", 32, NewBattle);
         Place((RectTransform)retryButton.transform, new Vector2(0.68f, 0.1f), new Vector2(0.97f, 0.9f), Vector2.zero, Vector2.zero);
 
+        effects = Box(root, new Color(0, 0, 0, 0), Vector2.zero, Vector2.one);
+        effects.name = "Effects";
+        effects.GetComponent<Image>().raycastTarget = false;
         BuildProgramScreen();
     }
 
@@ -448,7 +664,7 @@ public class MagicGame : MonoBehaviour
 
     UnitCard MakeCard(Unit u, Color color, Vector2 min, Vector2 max)
     {
-        var rect = Box(root, color, min, max);
+        var rect = Box(cardLayer, color, min, max);
         rect.gameObject.AddComponent<CanvasGroup>();
         var frame = rect.gameObject.AddComponent<Outline>();
         frame.effectDistance = new Vector2(6, -6);
@@ -478,7 +694,13 @@ public class MagicGame : MonoBehaviour
         var info = MakeText(rect, "", 19, TextAnchor.UpperCenter);
         Place(info.rectTransform, new Vector2(0, 0), new Vector2(1, 0.25f), new Vector2(6, 4), new Vector2(-6, 0));
 
-        return new UnitCard { Rect = rect, Frame = frame, HpFill = hpFill, HpText = hpText, InfoText = info };
+        var card = new UnitCard
+        {
+            Rect = rect, Frame = frame, HpFill = hpFill, HpText = hpText, InfoText = info,
+            Art = artRt, ArtImage = artImg, Normal = artImg.sprite, Blink = u.IsAlly ? PixelSprite(u.Art, false, true) : null,
+            Phase = Random.Range(0f, 6.28f), BlinkTimer = Random.Range(1f, 4f), ShownHp = u.Hp,
+        };
+        return card;
     }
 
     RectTransform MakeIcon(Unit u, Color color, float y)
@@ -606,11 +828,12 @@ public class MagicGame : MonoBehaviour
     static readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
 
     // PixelArt.cs の文字の並びから絵を作る。head = true なら顔のまわりだけ切り出す
-    static Sprite PixelSprite(string name, bool head)
+    static Sprite PixelSprite(string name, bool head, bool blink = false)
     {
-        string key = name + (head ? ":head" : "");
+        string key = name + (head ? ":head" : "") + (blink ? ":blink" : "");
         if (spriteCache.TryGetValue(key, out var cached)) return cached;
         var rows = PixelArt.Sprites[name];
+        if (blink) rows = CloseEyes(rows);
         var pal = new Dictionary<char, Color>();
         foreach (var kv in PixelArt.Common) pal[kv.Key] = Hex(kv.Value);
         foreach (var kv in PixelArt.Palettes[name]) pal[kv.Key] = Hex(kv.Value);
@@ -629,6 +852,26 @@ public class MagicGame : MonoBehaviour
         var sp = Sprite.Create(tex, r, new Vector2(0.5f, 0.5f), 32f);
         spriteCache[key] = sp;
         return sp;
+    }
+
+    // まばたき用：目（13〜14 行目の目の色）を肌にして、14 行目に閉じた目の線を引く
+    static string[] CloseEyes(string[] rows)
+    {
+        var r = (string[])rows.Clone();
+        var r12 = r[12].ToCharArray();
+        var r13 = r[13].ToCharArray();
+        var r14 = r[14].ToCharArray();
+        foreach (int ex in new[] { 11, 19 })
+            for (int x = ex; x <= ex + 2; x++)
+            {
+                r12[x] = 'S';
+                r13[x] = 'S';
+                r14[x] = 'K';
+            }
+        r[12] = new string(r12);
+        r[13] = new string(r13);
+        r[14] = new string(r14);
+        return r;
     }
 
     static Color Hex(string s)

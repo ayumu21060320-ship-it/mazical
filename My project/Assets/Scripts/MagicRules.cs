@@ -190,7 +190,7 @@ namespace MagicBattle
     {
         public string Name;
         public string Short;      // タイムラインのアイコンの 1 文字
-        public string Art;        // ドット絵の名前（PixelArt.Sprites）
+        public string Art;        // ドット絵の名前（ArtData.cs。味方は「名前_ポーズ」）
         public bool IsAlly;
         public int MaxHp, Hp;
         public float Gauge;       // タイムライン上の位置。Battle.GaugeLength で行動する

@@ -1,6 +1,7 @@
 // マジカルコンパイルの画面と操作。シーンを再生すると自動で起動する（シーンに何も置かなくてよい）
 // 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
 //
+//   オープニング:   机の上のパソコンを 3D で映して画面に寄り、デスクトップへ（MagicGame.Intro.cs）
 //   タイトル画面:   ロゴと3人。「スタート」で戦闘へ
 //   戦闘画面:       味方（左）とウイルス（右）が舞台に立つ。味方をクリックで選び、右のコマンドから
 //                   「プログラム」で魔法を組む。「バトル開始」でタイムラインが進み、右端に着いたキャラから行動する
@@ -20,7 +21,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using MagicBattle;
 
-public class MagicGame : MonoBehaviour
+public partial class MagicGame : MonoBehaviour
 {
     // ---- 色（企画書に合わせる）----
     static readonly Color Pink = UiKit.Hex("ff4fb8");
@@ -47,7 +48,7 @@ public class MagicGame : MonoBehaviour
         if (FindAnyObjectByType<MagicGame>() == null) new GameObject("MagicGame").AddComponent<MagicGame>();
     }
 
-    enum Phase { Title, Planning, Running, Finished }
+    enum Phase { Desktop, Title, Planning, Running, Finished }
 
     Battle battle;
     Phase phase = Phase.Title;
@@ -137,16 +138,18 @@ public class MagicGame : MonoBehaviour
         BuildCanvas();
         BuildTitle();
         BuildBattle();
+        BuildDesktop();
         effects = Layer("Effects");
         BuildProgramScreen();
         BuildNoise();
-        ShowTitle();
+        StartIntro();   // 3D のパソコン → デスクトップ → タイトル（MagicGame.Intro.cs）
     }
 
     void ShowTitle()
     {
         StopAllCoroutines();
         phase = Phase.Title;
+        desktopLayer.gameObject.SetActive(false);
         titleLayer.gameObject.SetActive(true);
         battleLayer.gameObject.SetActive(false);
         programScreen.SetActive(false);
@@ -199,6 +202,7 @@ public class MagicGame : MonoBehaviour
     void Update()
     {
         if (phase == Phase.Running && !busy) StepBattle(Time.deltaTime);
+        UpdateClock();
         if (battle != null && battleLayer.gameObject.activeSelf)
         {
             UpdateTimeline();

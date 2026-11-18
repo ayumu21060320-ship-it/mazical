@@ -331,6 +331,7 @@ public partial class MagicGame : MonoBehaviour
     void OnAllyClicked(Unit u)
     {
         if (phase != Phase.Planning || intro || !u.Alive) return;
+        if (decided.Contains(u)) { AddLog(u.Name + "の行動は決定ずみです（選び直せません）"); return; }
         selected = u;
         RefreshBattle();
     }
@@ -346,6 +347,7 @@ public partial class MagicGame : MonoBehaviour
     {
         if (phase != Phase.Planning || intro) return;
         if (selected == null || !selected.Alive) selected = battle.Allies.Find(a => a.Alive);
+        if (decided.Contains(selected)) { AddLog(selected.Name + "の行動は決定ずみです"); return; }
         if (selected.LinkedTo != null) { AddLog(selected.Name + "は" + selected.LinkedTo.Name + "とリンク中なので、プログラムを組めません"); return; }
         OpenProgram(selected, selected.LinkPartner);
     }
@@ -368,6 +370,7 @@ public partial class MagicGame : MonoBehaviour
     void OnChargeCommand()
     {
         if (phase != Phase.Planning || intro || selected == null || !selected.Alive) return;
+        if (decided.Contains(selected)) { AddLog(selected.Name + "の行動は決定ずみです"); return; }
         if (selected.LinkPartner != null || selected.LinkedTo != null) { AddLog("リンク中はチャージできません"); return; }
         bool on = !selected.Charging;
         battle.SetCharge(selected, on);
@@ -381,13 +384,14 @@ public partial class MagicGame : MonoBehaviour
     void OnLinkCommand()
     {
         if (phase != Phase.Planning || intro || selected == null || !selected.Alive) return;
+        if (decided.Contains(selected)) { AddLog(selected.Name + "の行動は決定ずみです"); return; }
         if (selected.LinkedTo != null) { AddLog(selected.Name + "は" + selected.LinkedTo.Name + "とリンク中です"); return; }
         if (selected.LinkPartner != null) { OpenProgram(selected, selected.LinkPartner); return; }
         if (battle.LinksLeft <= 0) { AddLog("リンクプログラムはこの試合ではもう使えません"); return; }
         ClearChildren(linkPickerList);
         foreach (var u in battle.Allies)
         {
-            if (u == selected || !u.Alive || u.LinkPartner != null || u.LinkedTo != null) continue;
+            if (u == selected || !u.Alive || u.LinkPartner != null || u.LinkedTo != null || decided.Contains(u)) continue;   // 決定ずみの味方はペアにできない
             var partner = u;
             var b = CommandButton(linkPickerList, "", 34, () => OpenProgram(selected, partner), false);
             b.gameObject.AddComponent<LayoutElement>().preferredHeight = 90;
@@ -640,7 +644,7 @@ public partial class MagicGame : MonoBehaviour
                    : selected.Spell.Describe() + "（" + Compiler.SpeedLabel(selected.Spell.Memory, SpellCapacity(selected)) + "）") + "</size>";
             chargeLabel.text = selected.Charging ? "チャージをやめる" : "チャージ";
             int order = battle.Allies.IndexOf(selected) + 1;
-            commandTitle.text = "<size=22><color=#ffd84a>" + order + "人目の行動" + (decided.Contains(selected) ? "（決定ずみ・選び直せる）" : "") + "</color></size>\n" + commandTitle.text;
+            commandTitle.text = "<size=22><color=#ffd84a>" + order + "人目の行動" + (decided.Contains(selected) ? "（決定ずみ）" : "") + "</color></size>\n" + commandTitle.text;
         }
         goLabel.text = AllDecided() ? "バトル開始" : selected != null && selected.Spell != null ? "前と同じで決定" : "何もしないで決定";
         linkLabel.text = "リンクプログラム <size=24>残り" + battle.LinksLeft + "</size>";
@@ -687,7 +691,7 @@ public partial class MagicGame : MonoBehaviour
         tabsRoot.gameObject.SetActive(!linkMode);
         headerImg.color = linkMode ? Pink : UiKit.Hex("1e5cf0");
         headerText.text = linkMode ? "リンクプログラム" : "プログラム";
-        cancelLinkButton.SetActive(linkMode && editing.LinkPartner != null);
+        cancelLinkButton.SetActive(false);   // 決めた行動は選び直せないので、送ったリンクも取り消さない
         partnerPortrait.gameObject.SetActive(linkMode);
         if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(0, 0, 40, 44));
         foreach (var t in robotTabs)
@@ -1973,6 +1977,7 @@ public partial class MagicGame : MonoBehaviour
                 var u = battle.Allies[idx];
                 if (!u.Alive) return;
                 if (u.LinkedTo != null) { programMessage.text = u.Name + "は" + u.LinkedTo.Name + "とリンク中です"; return; }
+                if (decided.Contains(u)) { programMessage.text = u.Name + "の行動は決定ずみです（選び直せません）"; return; }
                 OpenProgram(u, u.LinkPartner);
             });
             var face = Img(tab.rectTransform, null, Color.white);

@@ -26,6 +26,7 @@ public partial class MagicGame
     string lastIconName;
     bool introPlaying;
     RectTransform gameIcon;   // デスクトップの「マジカルコンパイル」のアイコン（ウィンドウがここから開く）
+    readonly System.Collections.Generic.List<(GameObject go, Text text)> badges = new System.Collections.Generic.List<(GameObject, Text)>();
 
     // ================= 3D のオープニング =================
 
@@ -215,6 +216,7 @@ public partial class MagicGame
             var slot = NewRect(bar, "Pin");
             Anchor(slot, 0.5f, 0.5f, 0.5f, 0.5f, -40 + i * 56, -22, 4 + i * 56, 22);
             pins[i](slot);
+            if (i == 2) AddBadge(slot, 20f);
         }
         var tray = MakeText(bar, "▲　あ　Wi-Fi", 22, new Color(0.25f, 0.25f, 0.3f), TextAnchor.MiddleRight, false);
         Anchor(tray.rectTransform, 1, 0, 1, 1, -400, 0, -250, 0);
@@ -254,8 +256,48 @@ public partial class MagicGame
         desktopLayer.gameObject.SetActive(false);
     }
 
+    // アイコンの右上の赤い丸の数字（まだ駆除していない依頼の数）
+    void AddBadge(RectTransform icon, float size)
+    {
+        var b = Img(icon, UiKit.Circle(), UiKit.Hex("e8283c"));
+        var rt = b.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
+        rt.sizeDelta = new Vector2(size, size);
+        rt.anchoredPosition = new Vector2(-size * 0.15f, -size * 0.15f);
+        var ol = b.gameObject.AddComponent<Outline>();
+        ol.effectColor = Color.white;
+        ol.effectDistance = new Vector2(2, -2);
+        var t = MakeText(rt, "", (int)(size * 0.62f), Color.white, TextAnchor.MiddleCenter, true);
+        b.gameObject.SetActive(false);
+        badges.Add((b.gameObject, t));
+    }
+
+    void UpdateBadges(bool show)
+    {
+        int n = 0;
+        foreach (var r in Requests.All) if (!IsCleared(r)) n++;
+        foreach (var b in badges)
+        {
+            b.go.SetActive(show && n > 0);
+            b.text.text = n.ToString();
+        }
+    }
+
+    IEnumerator BadgePop()
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.3f)
+        {
+            float k = 1f + 0.5f * Mathf.Sin(t * Mathf.PI);
+            foreach (var b in badges) if (b.go != null) b.go.transform.localScale = Vector3.one * k;
+            yield return null;
+        }
+        foreach (var b in badges) if (b.go != null) b.go.transform.localScale = Vector3.one;
+    }
+
     IEnumerator ShowToast()
     {
+        UpdateBadges(true);
+        StartCoroutine(BadgePop());
         toast.gameObject.SetActive(true);
         var end = toast.anchoredPosition;
         var from = end + new Vector2(560, 0);
@@ -282,6 +324,7 @@ public partial class MagicGame
         var art = NewRect(rt, "Icon");
         Anchor(art, 0.5f, 1, 0.5f, 1, -42, -98, 42, -14);
         drawIcon(art);
+        if (label == "マジカルコンパイル") AddBadge(art, 34f);
         var t = MakeText(rt, label, 20, Color.white, TextAnchor.UpperCenter, false);
         Anchor(t.rectTransform, 0, 0, 1, 0, 0, 0, 0, 48);
         var sh = t.gameObject.AddComponent<Shadow>();

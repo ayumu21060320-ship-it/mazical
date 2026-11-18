@@ -104,7 +104,9 @@ public partial class MagicGame : MonoBehaviour
     Text turnText, logText, commandTitle;
     RectTransform commandMenu, timelineBar, pointerLine, hudPanel;
     readonly List<Button> commandButtons = new List<Button>();
-    Text chargeLabel, linkLabel;
+    Text chargeLabel, linkLabel, goLabel;
+    // コマンドバトル：このターンの行動を決めた味方（左から順に決めていき、全員そろったらバトル開始）
+    readonly HashSet<Unit> decided = new HashSet<Unit>();
     GameObject linkPicker;
     RectTransform linkPickerList;
     GameObject resultPanel;
@@ -248,8 +250,9 @@ public partial class MagicGame : MonoBehaviour
         }
         phase = Phase.Planning;
         log.Clear();
-        AddLog(currentRequest.Client + "のパソコンにつないだ！ 味方を選んで「プログラム」で魔法を組もう");
-        if (carried > 0) AddLog("前に組んだプログラムを " + carried + " 人にセットした。そのまま「バトル開始」もできる");
+        AddLog(currentRequest.Client + "のパソコンにつないだ！ 左のロボットから順に行動を決めよう");
+        if (carried > 0) AddLog("前に組んだプログラムを " + carried + " 人にセットした。「前と同じで決定」ですぐ決められる");
+        StartCommandRound();
         BuildUnits();
         programScreen.SetActive(false);
         resultPanel.SetActive(false);
@@ -287,7 +290,8 @@ public partial class MagicGame : MonoBehaviour
             foreach (var note in battle.EndTurn()) AddLog(note);
             StartCoroutine(TurnBanner(battle.Turn));
             phase = Phase.Planning;
-            AddLog("ターン" + battle.Turn + "。プログラムを組み直すか、そのまま「バトル開始」");
+            StartCommandRound();
+            AddLog("ターン" + battle.Turn + "。左のロボットから行動を決めよう");
             RefreshBattle();
             return;
         }
@@ -368,7 +372,8 @@ public partial class MagicGame : MonoBehaviour
         bool on = !selected.Charging;
         battle.SetCharge(selected, on);
         AddLog(on ? selected.Name + "はこのターン、チャージする（次のターン メモリ容量と攻撃力がアップ）" : selected.Name + "のチャージをやめた");
-        if (on) StartCoroutine(ChargeFx(views[selected], 0.5f));
+        if (on) { StartCoroutine(ChargeFx(views[selected], 0.5f)); Decide(selected); return; }
+        decided.Remove(selected);
         RefreshBattle();
     }
 
@@ -401,6 +406,8 @@ public partial class MagicGame : MonoBehaviour
     {
         if (editing == null || editing.LinkPartner == null) return;
         AddLog(editing.Name + "と" + editing.LinkPartner.Name + "のリンクをやめた");
+        decided.Remove(editing);
+        if (editing.LinkPartner != null) decided.Remove(editing.LinkPartner);
         battle.CancelLink(editing);
         programScreen.SetActive(false);
         RefreshBattle();
@@ -416,6 +423,56 @@ public partial class MagicGame : MonoBehaviour
 
     // 魔法の処理速度の表示に使うメモリ容量
     int SpellCapacity(Unit u) => u.Spell != null && u.Spell.IsLink && u.LinkPartner != null ? battle.LinkCapacity(u, u.LinkPartner) : battle.CapacityOf(u);
+
+    // ---- コマンドバトルの順番 ----
+
+    // ターンの始め：だれも決めていない状態で、いちばん左の味方から
+    void StartCommandRound()
+    {
+        decided.Clear();
+        selected = null;
+        NextCommand();
+    }
+
+    bool AllDecided()
+    {
+        foreach (var a in battle.Allies)
+            if (a.Alive && a.LinkedTo == null && !decided.Contains(a)) return false;
+        return true;
+    }
+
+    // 次に行動を決める味方を選ぶ（左から。リンクの相手は決めなくてよい）。全員決まったら選ばない
+    void NextCommand()
+    {
+        int start = selected == null ? 0 : battle.Allies.IndexOf(selected) + 1;
+        for (int k = 0; k < battle.Allies.Count; k++)
+        {
+            var a = battle.Allies[(start + k) % battle.Allies.Count];
+            if (a.Alive && a.LinkedTo == null && !decided.Contains(a)) { selected = a; return; }
+        }
+        if (selected == null || !selected.Alive) selected = battle.Allies.Find(a => a.Alive);
+    }
+
+    // この味方の行動が決まった → 次の味方へ
+    void Decide(Unit u)
+    {
+        decided.Add(u);
+        if (u.LinkPartner != null) decided.Add(u.LinkPartner);
+        NextCommand();
+        if (AllDecided()) AddLog("全員の行動が決まった！「バトル開始」で戦闘へ");
+        else AddLog(selected.Name + "の行動を選んでください");
+        RefreshBattle();
+    }
+
+    // ピンクのボタン：まだ決めていない人がいれば「前と同じで決定」、全員決まったら「バトル開始」
+    void OnGoButton()
+    {
+        if (phase != Phase.Planning || intro) return;
+        if (AllDecided()) { OnStartButton(); return; }
+        if (selected == null) return;
+        if (selected.Spell == null && !selected.Charging) AddLog(selected.Name + "はプログラムが無いので、このターンは何もしない");
+        Decide(selected);
+    }
 
     void OnStartButton()
     {
@@ -456,6 +513,17 @@ public partial class MagicGame : MonoBehaviour
         RefreshBattle();
         RefreshProgram(keepMessage: true);
         StartCoroutine(Noise(0.15f, 0.25f));
+        StartCoroutine(AfterSend(editing));
+    }
+
+    // 送信したら少しして画面を閉じ、次の味方の行動選択へ
+    IEnumerator AfterSend(Unit who)
+    {
+        yield return new WaitForSeconds(0.45f);
+        if (!programScreen.activeSelf || phase != Phase.Planning) yield break;
+        programScreen.SetActive(false);
+        selected = who;
+        Decide(who);
     }
 
     // ================= ブロックのドラッグ（BlockView から呼ばれる） =================
@@ -543,7 +611,8 @@ public partial class MagicGame : MonoBehaviour
                 bool sel = u == selected && phase == Phase.Planning;
                 v.Ring.gameObject.SetActive(sel && !v.Dead);
                 var hud = allyHud[u];
-                hud.status.text = StatusOf(u);
+                hud.status.text = (decided.Contains(u) && phase == Phase.Planning ? "<color=#7dff8a>決定</color>　" : "") + StatusOf(u);
+                hud.status.supportRichText = true;
                 v.Aura.gameObject.SetActive(!v.Dead && (u.Charging || u.Charged || u.LinkPartner != null || u.LinkedTo != null));
                 v.Aura.color = u.LinkPartner != null || u.LinkedTo != null ? new Color(1f, 0.4f, 0.85f, 0.6f) : u.Charged ? new Color(1f, 0.85f, 0.2f, 0.75f) : new Color(1f, 0.85f, 0.2f, 0.4f);
                 hud.hp.text = "HP" + v.ShownHp;
@@ -570,7 +639,10 @@ public partial class MagicGame : MonoBehaviour
                    : selected.Spell == null ? "プログラム：まだ無い"
                    : selected.Spell.Describe() + "（" + Compiler.SpeedLabel(selected.Spell.Memory, SpellCapacity(selected)) + "）") + "</size>";
             chargeLabel.text = selected.Charging ? "チャージをやめる" : "チャージ";
+            int order = battle.Allies.IndexOf(selected) + 1;
+            commandTitle.text = "<size=22><color=#ffd84a>" + order + "人目の行動" + (decided.Contains(selected) ? "（決定ずみ・選び直せる）" : "") + "</color></size>\n" + commandTitle.text;
         }
+        goLabel.text = AllDecided() ? "バトル開始" : selected != null && selected.Spell != null ? "前と同じで決定" : "何もしないで決定";
         linkLabel.text = "リンクプログラム <size=24>残り" + battle.LinksLeft + "</size>";
         foreach (var b in commandButtons) b.interactable = plan;
     }
@@ -1076,6 +1148,7 @@ public partial class MagicGame : MonoBehaviour
         var notes = battle.NextWave();
         foreach (var n in notes) AddLog(n);
         phase = Phase.Planning;
+        StartCommandRound();
         BuildUnits();
         foreach (var e in battle.Enemies) { var v = views[e]; v.ArtImage.enabled = false; v.Dying = true; }
         intro = true;
@@ -1544,7 +1617,8 @@ public partial class MagicGame : MonoBehaviour
             if (i == 3) linkLabel = label;
             commandButtons.Add(b);
         }
-        var go = CommandButton(commandMenu, "バトル開始", 38, OnStartButton, true);
+        var go = CommandButton(commandMenu, "バトル開始", 34, OnGoButton, true);
+        goLabel = go.GetComponentInChildren<Text>();
         Anchor((RectTransform)go.transform, 0.06f, 0f, 1.06f, 0.11f);
         commandButtons.Add(go);
 

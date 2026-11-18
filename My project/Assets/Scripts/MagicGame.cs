@@ -2,7 +2,8 @@
 // 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
 //
 //   オープニング:   机の上のパソコンを 3D で映して画面に寄り、デスクトップへ（MagicGame.Intro.cs）
-//   タイトル画面:   ロゴと3人。「スタート」で戦闘へ
+//   タイトル画面:   ロゴと3人。「スタート」で依頼一覧へ
+//   依頼一覧:       どのパソコン（依頼）を助けに行くか選ぶと戦闘へ
 //   戦闘画面:       味方（左）とウイルス（右）が舞台に立つ。味方をクリックで選び、右のコマンドから
 //                   「プログラム」で魔法を組む。「バトル開始」でタイムラインが進み、右端に着いたキャラから行動する
 //                   ウイルスをクリックすると「1体」の魔法でねらう敵を選べる
@@ -48,9 +49,10 @@ public partial class MagicGame : MonoBehaviour
         if (FindAnyObjectByType<MagicGame>() == null) new GameObject("MagicGame").AddComponent<MagicGame>();
     }
 
-    enum Phase { Desktop, Title, Planning, Running, Finished }
+    enum Phase { Desktop, Title, Requests, Planning, Running, Finished }
 
     Battle battle;
+    Request currentRequest = Requests.All[0];
     Phase phase = Phase.Title;
     readonly Dictionary<Unit, List<Block>> drafts = new Dictionary<Unit, List<Block>>(); // 組みかけのコード
     readonly Dictionary<Unit, List<Block>> linkDrafts = new Dictionary<Unit, List<Block>>(); // 組みかけのリンクプログラム
@@ -66,7 +68,7 @@ public partial class MagicGame : MonoBehaviour
     Font font;
     Canvas canvas;
     RectTransform root;
-    RectTransform titleLayer, battleLayer, stage, effects, noiseLayer;
+    RectTransform titleLayer, battleLayer, stage, effects, noiseLayer, requestLayer, requestCards;
     RawImage noise;
     CoroutineRunner ambient;   // 背景の演出（ずっと動かすもの）
 
@@ -138,6 +140,7 @@ public partial class MagicGame : MonoBehaviour
         BuildCanvas();
         BuildTitle();
         BuildBattle();
+        BuildRequests();
         BuildDesktop();
         effects = Layer("Effects");
         BuildProgramScreen();
@@ -150,6 +153,7 @@ public partial class MagicGame : MonoBehaviour
         StopAllCoroutines();
         phase = Phase.Title;
         desktopLayer.gameObject.SetActive(false);
+        requestLayer.gameObject.SetActive(false);
         titleLayer.gameObject.SetActive(true);
         battleLayer.gameObject.SetActive(false);
         programScreen.SetActive(false);
@@ -160,10 +164,33 @@ public partial class MagicGame : MonoBehaviour
     void OnTitleStart()
     {
         if (phase != Phase.Title) return;
+        ShowRequests();
+    }
+
+    // 依頼一覧へ
+    void ShowRequests()
+    {
+        StopAllCoroutines();
+        ClearChildren(effects);
+        phase = Phase.Requests;
         titleLayer.gameObject.SetActive(false);
+        battleLayer.gameObject.SetActive(false);
+        programScreen.SetActive(false);
+        requestLayer.gameObject.SetActive(true);
+        RebuildRequestCards();
+        StartCoroutine(Noise(0.3f, 0.4f));
+    }
+
+    void OnRequestChosen(Request r)
+    {
+        if (phase != Phase.Requests) return;
+        currentRequest = r;
+        requestLayer.gameObject.SetActive(false);
         battleLayer.gameObject.SetActive(true);
         NewBattle();
     }
+
+    static bool IsCleared(Request r) => PlayerPrefs.GetInt("clear_" + r.Id, 0) == 1;
 
     void NewBattle()
     {
@@ -173,7 +200,7 @@ public partial class MagicGame : MonoBehaviour
         noise.color = new Color(1, 1, 1, 0);
         busy = false;
         flying = 0;
-        battle = new Battle(System.Environment.TickCount);
+        battle = new Battle(System.Environment.TickCount, currentRequest);
         drafts.Clear();
         linkDrafts.Clear();
         foreach (var a in battle.Allies) drafts[a] = new List<Block>();
@@ -188,7 +215,7 @@ public partial class MagicGame : MonoBehaviour
         }
         phase = Phase.Planning;
         log.Clear();
-        AddLog("パソコンにウイルスが侵入！ 味方を選んで「プログラム」で魔法を組もう");
+        AddLog(currentRequest.Client + "のパソコンにつないだ！ 味方を選んで「プログラム」で魔法を組もう");
         BuildUnits();
         programScreen.SetActive(false);
         resultPanel.SetActive(false);
@@ -681,6 +708,7 @@ public partial class MagicGame : MonoBehaviour
         {
             phase = Phase.Finished;
             AddLog(battle.Won ? "ウイルスを全部駆除した！" : "システムダウン…");
+            if (battle.Won) { PlayerPrefs.SetInt("clear_" + currentRequest.Id, 1); PlayerPrefs.Save(); }
             StartCoroutine(ShowResult(battle.Won));
         }
         RefreshBattle();
@@ -905,7 +933,8 @@ public partial class MagicGame : MonoBehaviour
     {
         yield return new WaitForSeconds(0.6f);
         resultPanel.SetActive(true);
-        resultText.text = won ? "ウイルス駆除 完了！" : "システムダウン…";
+        resultText.text = won ? "ウイルス駆除 完了！\n<size=40>" + currentRequest.Client + "のパソコンを助けた！</size>" : "システムダウン…";
+        resultText.supportRichText = true;
         resultText.color = won ? Cyan : Magenta;
         StartCoroutine(Noise(0.5f, 0.6f));
     }
@@ -1348,7 +1377,7 @@ public partial class MagicGame : MonoBehaviour
         AddOutline(resultText, Color.black, 4f);
         var again = CommandButton(rp.rectTransform, "もう一度", 36, NewBattle, true);
         Anchor((RectTransform)again.transform, 0.3f, 0.26f, 0.48f, 0.34f);
-        var back = CommandButton(rp.rectTransform, "タイトルへ", 36, ShowTitle, false);
+        var back = CommandButton(rp.rectTransform, "依頼一覧へ", 36, ShowRequests, false);
         Anchor((RectTransform)back.transform, 0.52f, 0.26f, 0.7f, 0.34f);
         resultPanel.SetActive(false);
 
@@ -1383,12 +1412,14 @@ public partial class MagicGame : MonoBehaviour
 
         // 足もとの位置（画面の割合）。真ん中のキャラが少し手前
         var allyPos = new[] { new Vector2(0.09f, 0.29f), new Vector2(0.2f, 0.24f), new Vector2(0.31f, 0.29f) };
-        var enemyPos = new[] { new Vector2(0.64f, 0.3f), new Vector2(0.76f, 0.25f), new Vector2(0.89f, 0.31f) };
-        var enemyScale = new[] { 6f, 6f, 7.5f };
+        var enemyPos = battle.Enemies.Count == 2
+            ? new[] { new Vector2(0.68f, 0.28f), new Vector2(0.85f, 0.27f) }
+            : new[] { new Vector2(0.64f, 0.3f), new Vector2(0.76f, 0.25f), new Vector2(0.89f, 0.31f) };
         // 奥のキャラから順に置く（手前のキャラが上に重なるように）
         var order = new List<(Unit u, Vector2 pos, float scale)>();
         for (int i = 0; i < 3; i++) order.Add((battle.Allies[i], allyPos[i], AllyScale));
-        for (int i = 0; i < 3; i++) order.Add((battle.Enemies[i], enemyPos[i], enemyScale[i]));
+        for (int i = 0; i < battle.Enemies.Count && i < enemyPos.Length; i++)
+            order.Add((battle.Enemies[i], enemyPos[i], battle.Enemies[i].Art == "troy" ? 7.5f : 6f));
         order.Sort((a, b) => b.pos.y.CompareTo(a.pos.y));
         foreach (var o in order) views[o.u] = MakeUnit(o.u, o.pos, o.scale);
 
@@ -1528,6 +1559,91 @@ public partial class MagicGame : MonoBehaviour
             }
         tex.Apply();
         return tex;
+    }
+
+    // ================= 依頼一覧 =================
+
+    void BuildRequests()
+    {
+        requestLayer = Layer("Requests");
+        var bg = requestLayer.gameObject.AddComponent<RawImage>();
+        bg.texture = UiKit.DiagonalGradient(UiKit.Hex("ffc3e6"), UiKit.Hex("b4e0ff"));
+        var mc = Img(requestLayer, UiKit.MagicCircle(), new Color(1, 1, 1, 0.35f)).rectTransform;
+        mc.anchorMin = mc.anchorMax = new Vector2(0.12f, 0.15f);
+        mc.sizeDelta = new Vector2(700, 700);
+        ambient.StartCoroutine(SpinForever(mc, -5f));
+
+        var header = Img(requestLayer, UiKit.Slant(), UiKit.Hex("1e5cf0"));
+        header.type = Image.Type.Sliced;
+        Anchor(header.rectTransform, -0.02f, 0.88f, 0.3f, 0.97f);
+        var ht = MakeText(header.rectTransform, "依頼一覧", 56, Color.white, TextAnchor.MiddleCenter, true);
+        ht.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(ht, UiKit.Hex("0a1c60"), 3f);
+        var sub = MakeText(requestLayer, "どのパソコンを助けに行く？　リモートでつないで、ウイルスを撃退しよう", 30, Ink, TextAnchor.MiddleLeft, true);
+        Anchor(sub.rectTransform, 0.32f, 0.88f, 0.98f, 0.97f);
+
+        requestCards = NewRect(requestLayer, "Cards");
+        Anchor(requestCards, 0.03f, 0.14f, 0.97f, 0.85f);
+
+        var back = CommandButton(requestLayer, "タイトルへ", 32, ShowTitle, false);
+        Anchor((RectTransform)back.transform, 0.03f, 0.03f, 0.2f, 0.11f);
+        requestLayer.gameObject.SetActive(false);
+    }
+
+    void RebuildRequestCards()
+    {
+        ClearChildren(requestCards);
+        int n = Requests.All.Length;
+        for (int i = 0; i < n; i++)
+        {
+            var r = Requests.All[i];
+            var border = Img(requestCards, UiKit.RoundRect(28), IsCleared(r) ? UiKit.Hex("2fae4a") : Purple);
+            border.type = Image.Type.Sliced;
+            Anchor(border.rectTransform, i / (float)n + 0.01f, 0, (i + 1) / (float)n - 0.01f, 1);
+            var card = Img(border.rectTransform, UiKit.RoundRect(24), new Color(1, 1, 1, 0.95f));
+            card.type = Image.Type.Sliced;
+            var c = card.rectTransform;
+            Anchor(c, 0, 0, 1, 1, 6, 6, -6, -6);
+
+            // 差出人（メールのような見た目）
+            var mail = Img(c, UiKit.RoundRect(8), Pink);
+            mail.type = Image.Type.Sliced;
+            Anchor(mail.rectTransform, 0, 1, 0, 1, 24, -84, 84, -24);
+            MakeText(mail.rectTransform, "依頼", 22, Color.white, TextAnchor.MiddleCenter, true);
+            var from = MakeText(c, r.Client + " さんから", 30, Ink, TextAnchor.MiddleLeft, true);
+            Anchor(from.rectTransform, 0, 1, 1, 1, 100, -84, -20, -24);
+            var stars = MakeText(c, new string('★', r.Stars) + new string('☆', 3 - r.Stars), 34, UiKit.Hex("f0a800"), TextAnchor.MiddleRight, true);
+            Anchor(stars.rectTransform, 0, 1, 1, 1, 0, -84, -24, -24);
+            var title = MakeText(c, r.Title, 34, Purple, TextAnchor.UpperLeft, true);
+            Anchor(title.rectTransform, 0, 1, 1, 1, 24, -170, -24, -100);
+            var msg = MakeText(c, r.Message, 24, Ink, TextAnchor.UpperLeft, false);
+            Anchor(msg.rectTransform, 0, 0.36f, 1, 1, 24, 0, -24, -180);
+
+            // いるウイルス
+            var vl = MakeText(c, "見つかったウイルス", 22, UiKit.Hex("6a5a80"), TextAnchor.LowerLeft, true);
+            Anchor(vl.rectTransform, 0, 0.3f, 1, 0.36f, 24, 0, -24, 0);
+            for (int k = 0; k < r.Enemies.Length; k++)
+            {
+                var e = r.Enemies[k];
+                var slot = Img(c, UiKit.RoundRect(14), UiKit.Hex("2a1e3a"));
+                slot.type = Image.Type.Sliced;
+                Anchor(slot.rectTransform, 0, 0.15f, 0, 0.29f, 24 + k * 118, 0, 132 + k * 118, 0);
+                var art = Img(slot.rectTransform, UiKit.Art(e.Art), Color.white);
+                art.preserveAspect = true;
+                Anchor(art.rectTransform, 0, 0, 1, 1, 8, 8, -8, -8);
+            }
+            var go = CommandButton(c, IsCleared(r) ? "もう一度行く" : "助けに行く", 34, () => OnRequestChosen(r), true);
+            Anchor((RectTransform)go.transform, 0.3f, 0.02f, 0.97f, 0.12f);
+            if (IsCleared(r))
+            {
+                var stamp = Img(c, UiKit.RoundRect(12), new Color(0.18f, 0.68f, 0.29f, 0.9f));
+                stamp.type = Image.Type.Sliced;
+                stamp.rectTransform.anchorMin = stamp.rectTransform.anchorMax = new Vector2(0.78f, 0.62f);
+                stamp.rectTransform.sizeDelta = new Vector2(180, 64);
+                stamp.rectTransform.localRotation = Quaternion.Euler(0, 0, 12f);
+                MakeText(stamp.rectTransform, "駆除ずみ", 32, Color.white, TextAnchor.MiddleCenter, true);
+            }
+        }
     }
 
     // ================= プログラム画面 =================

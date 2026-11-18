@@ -1,5 +1,6 @@
 // オープニング：机の上のパソコンを 3D で映し、画面に近づいていくと、その画面（デスクトップ）がそのままゲームの画面になる
-// デスクトップでは「マジカルコンパイル」のアイコンをダブルクリック（または通知の「起動する」）でゲームが始まる
+// デスクトップでは「マジカルコンパイル」のアイコンをクリックするとゲームが始まる。右下の通知は「依頼が届いた」お知らせだけ
+// タスクバーの「♪」か「設定」のアイコンで音量を変えられる（PlayerPrefs に保存）
 // プレイヤーはプログラマー。ほかの人のパソコンに入りこんだウイルスを、このパソコンから撃退する、というメタな始まり
 //
 // しくみ：はじめは UI を RenderTexture に描き、3D のモニターの画面に貼る。カメラが画面いっぱいまで寄ったら、
@@ -10,11 +11,13 @@ using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using MagicBattle;
 
 public partial class MagicGame
 {
     const int SceneLayer = 30;       // 3D の部屋のレイヤー（UI を描くカメラには映さない）
-    RectTransform desktopLayer, toast, iconsRoot;
+    RectTransform desktopLayer, toast, iconsRoot, settingsWindow;
+    public static float BgmVolume = 0.6f, SeVolume = 0.8f;   // BGM と効果音の音量（音を入れたときに使う）
     GameObject sceneRoot;
     Camera uiCam;
     RenderTexture screenRT;
@@ -189,7 +192,8 @@ public partial class MagicGame
         DesktopIcon("マイドキュメント", 0, IconFolder);
         DesktopIcon("PC", 1, IconMonitor);
         DesktopIcon("ごみ箱", 2, IconTrash);
-        DesktopIcon("マジカルコンパイル", 3, IconGame);
+        DesktopIcon("設定", 3, IconGear);
+        DesktopIcon("マジカルコンパイル", 4, IconGame);
 
         // タスクバー
         var bar = Img(desktopLayer, null, new Color(0.95f, 0.95f, 0.98f, 0.82f)).rectTransform;
@@ -212,7 +216,15 @@ public partial class MagicGame
             pins[i](slot);
         }
         var tray = MakeText(bar, "▲　あ　Wi-Fi", 22, new Color(0.25f, 0.25f, 0.3f), TextAnchor.MiddleRight, false);
-        Anchor(tray.rectTransform, 1, 0, 1, 1, -360, 0, -190, 0);
+        Anchor(tray.rectTransform, 1, 0, 1, 1, -400, 0, -250, 0);
+        var vol = Img(bar, UiKit.RoundRect(8), new Color(1, 1, 1, 0f));
+        vol.type = Image.Type.Sliced;
+        vol.raycastTarget = true;
+        Anchor(vol.rectTransform, 1, 0, 1, 1, -244, 10, -190, -10);
+        MakeText(vol.rectTransform, "♪", 28, new Color(0.25f, 0.25f, 0.3f), TextAnchor.MiddleCenter, true);
+        var vb = vol.gameObject.AddComponent<Button>();
+        vb.targetGraphic = vol;
+        vb.onClick.AddListener(ToggleSettings);
         clockText = MakeText(bar, "", 20, new Color(0.15f, 0.15f, 0.2f), TextAnchor.MiddleRight, false);
         Anchor(clockText.rectTransform, 1, 0, 1, 1, -180, 0, -24, 0);
 
@@ -221,15 +233,22 @@ public partial class MagicGame
         toast.GetComponent<Image>().type = Image.Type.Sliced;
         toast.anchorMin = toast.anchorMax = new Vector2(1, 0);
         toast.pivot = new Vector2(1, 0);
-        toast.sizeDelta = new Vector2(520, 230);
+        toast.sizeDelta = new Vector2(520, 150);
         toast.anchoredPosition = new Vector2(-20, 80);
-        var head = MakeText(toast, "リモートサポートの依頼", 26, Ink, TextAnchor.UpperLeft, true);
-        Anchor(head.rectTransform, 0, 1, 1, 1, 24, -56, -20, -16);
-        var body = MakeText(toast, "友だちのパソコンがウイルスに感染したみたい！\n『マジカルコンパイル』でつないで、助けてあげて！", 22, Ink, TextAnchor.UpperLeft, false);
-        Anchor(body.rectTransform, 0, 0, 1, 1, 24, 70, -20, -60);
-        var open = CommandButton(toast, "起動する", 28, OpenGame, true);
-        Anchor((RectTransform)open.transform, 0.45f, 0, 0.95f, 0, 0, 18, 0, 70);
+        var tIcon = NewRect(toast, "Icon");
+        Anchor(tIcon, 0, 0.5f, 0, 0.5f, 18, -44, 106, 44);
+        IconGame(tIcon);
+        var head = MakeText(toast, "マジカルコンパイル", 24, Ink, TextAnchor.UpperLeft, true);
+        Anchor(head.rectTransform, 0, 1, 1, 1, 120, -54, -20, -16);
+        var body = MakeText(toast, "新しい依頼が " + Requests.All.Length + " 件届きました", 26, Ink, TextAnchor.UpperLeft, false);
+        Anchor(body.rectTransform, 0, 0, 1, 1, 120, 16, -20, -60);
+        var tb = toast.gameObject.AddComponent<Button>();   // クリックで閉じる
+        tb.transition = Selectable.Transition.None;
+        tb.onClick.AddListener(() => toast.gameObject.SetActive(false));
+        toast.GetComponent<Image>().raycastTarget = true;
         toast.gameObject.SetActive(false);
+
+        BuildSettings();
 
         desktopLayer.gameObject.SetActive(false);
     }
@@ -276,12 +295,13 @@ public partial class MagicGame
     {
         foreach (Transform c in iconsRoot) c.GetComponent<Image>().color = new Color(1, 1, 1, 0f);
         cell.color = new Color(0.6f, 0.8f, 1f, 0.35f);   // 選ばれたアイコン
+        // マジカルコンパイルと設定はクリックで開く。ほかはダブルクリックで「開けません」
+        if (label == "マジカルコンパイル") { OpenGame(); return; }
+        if (label == "設定") { ToggleSettings(); return; }
         bool dbl = lastIconName == label && Time.time - lastIconClick < 0.45f;
         lastIconClick = Time.time;
         lastIconName = label;
-        if (!dbl) return;
-        if (label == "マジカルコンパイル") OpenGame();
-        else StartCoroutine(AccessDenied(label));
+        if (dbl) StartCoroutine(AccessDenied(label));
     }
 
     // ほかのアイコンは開けない（ウイルスのしわざ？）
@@ -306,6 +326,8 @@ public partial class MagicGame
     IEnumerator OpenWindow()
     {
         phase = Phase.Title;
+        settingsWindow.gameObject.SetActive(false);
+        toast.gameObject.SetActive(false);
         var win = Img(desktopLayer, null, UiKit.Hex("ffd3ec")).rectTransform;
         win.anchorMin = win.anchorMax = new Vector2(0.5f, 0.5f);
         var bar = Img(win, null, Pink).rectTransform;
@@ -334,7 +356,115 @@ public partial class MagicGame
         clockText.text = now.ToString("H:mm") + "\n" + now.ToString("yyyy/MM/dd");
     }
 
+    // ================= 音量の設定 =================
+
+    void BuildSettings()
+    {
+        var shadow = Img(desktopLayer, UiKit.RoundRect(20), new Color(0, 0, 0, 0.35f));
+        shadow.type = Image.Type.Sliced;
+        settingsWindow = shadow.rectTransform;
+        settingsWindow.anchorMin = settingsWindow.anchorMax = new Vector2(0.5f, 0.5f);
+        settingsWindow.sizeDelta = new Vector2(640, 420);
+        var win = Img(settingsWindow, UiKit.RoundRect(16), new Color(0.97f, 0.97f, 0.99f));
+        win.type = Image.Type.Sliced;
+        win.raycastTarget = true;
+        Anchor(win.rectTransform, 0, 0, 1, 1, 6, 6, -6, -6);
+        var bar = Img(win.rectTransform, UiKit.RoundRect(16), Pink);
+        bar.type = Image.Type.Sliced;
+        Anchor(bar.rectTransform, 0, 1, 1, 1, 0, -50, 0, 0);
+        MakeText(bar.rectTransform, "　設定 ― 音量", 24, Color.white, TextAnchor.MiddleLeft, true);
+        var close = Img(bar.rectTransform, null, new Color(1, 1, 1, 0f));
+        close.raycastTarget = true;
+        Anchor(close.rectTransform, 1, 0, 1, 1, -56, 0, 0, 0);
+        MakeText(close.rectTransform, "×", 30, Color.white, TextAnchor.MiddleCenter, true);
+        var cb = close.gameObject.AddComponent<Button>();
+        cb.targetGraphic = close;
+        cb.onClick.AddListener(ToggleSettings);
+
+        float master = PlayerPrefs.GetFloat("vol_master", 1f);
+        BgmVolume = PlayerPrefs.GetFloat("vol_bgm", 0.6f);
+        SeVolume = PlayerPrefs.GetFloat("vol_se", 0.8f);
+        AudioListener.volume = master;
+        VolumeRow(win.rectTransform, "全体", 0, master, v => { AudioListener.volume = v; PlayerPrefs.SetFloat("vol_master", v); });
+        VolumeRow(win.rectTransform, "BGM", 1, BgmVolume, v => { BgmVolume = v; PlayerPrefs.SetFloat("vol_bgm", v); });
+        VolumeRow(win.rectTransform, "効果音", 2, SeVolume, v => { SeVolume = v; PlayerPrefs.SetFloat("vol_se", v); });
+        var ok = CommandButton(win.rectTransform, "OK", 30, ToggleSettings, true);
+        Anchor((RectTransform)ok.transform, 0.6f, 0, 0.95f, 0, 0, 20, 0, 80);
+        settingsWindow.gameObject.SetActive(false);
+    }
+
+    void ToggleSettings()
+    {
+        bool on = !settingsWindow.gameObject.activeSelf;
+        settingsWindow.gameObject.SetActive(on);
+        if (on) settingsWindow.SetAsLastSibling();
+        else PlayerPrefs.Save();
+    }
+
+    // 音量の 1 行（名前・つまみ・%）
+    void VolumeRow(RectTransform parent, string label, int row, float value, Action<float> onChange)
+    {
+        float top = -80 - row * 86;
+        var name = MakeText(parent, label, 28, Ink, TextAnchor.MiddleLeft, true);
+        Anchor(name.rectTransform, 0, 1, 0, 1, 30, top - 50, 170, top);
+        var percent = MakeText(parent, "", 26, Ink, TextAnchor.MiddleRight, false);
+        Anchor(percent.rectTransform, 1, 1, 1, 1, -130, top - 50, -30, top);
+
+        var root = NewRect(parent, "Slider");
+        Anchor(root, 0, 1, 1, 1, 170, top - 40, -150, top - 10);
+        var back = Img(root, UiKit.RoundRect(12), UiKit.Hex("d8d0e8"));
+        back.type = Image.Type.Sliced;
+        back.raycastTarget = true;
+        Fill(back.rectTransform);
+        var fillArea = NewRect(root, "FillArea");
+        Anchor(fillArea, 0, 0, 1, 1, 0, 0, -10, 0);
+        var fill = Img(fillArea, UiKit.RoundRect(12), Pink);
+        fill.type = Image.Type.Sliced;
+        var handleArea = NewRect(root, "HandleArea");
+        Anchor(handleArea, 0, 0, 1, 1, 10, 0, -10, 0);
+        var handle = Img(handleArea, UiKit.Circle(), Color.white);
+        handle.raycastTarget = true;
+        handle.rectTransform.sizeDelta = new Vector2(40, 10);
+        var outline = handle.gameObject.AddComponent<Outline>();
+        outline.effectColor = Purple;
+        outline.effectDistance = new Vector2(2, -2);
+
+        var slider = root.gameObject.AddComponent<Slider>();
+        slider.fillRect = fill.rectTransform;
+        slider.handleRect = handle.rectTransform;
+        slider.targetGraphic = handle;
+        slider.minValue = 0f;
+        slider.maxValue = 1f;
+        slider.value = value;
+        percent.text = Mathf.RoundToInt(value * 100) + "%";
+        slider.onValueChanged.AddListener(v =>
+        {
+            percent.text = Mathf.RoundToInt(v * 100) + "%";
+            onChange(v);
+        });
+    }
+
     // ---- アイコンの絵（四角と丸で描く） ----
+
+    void IconGear(RectTransform r)
+    {
+        var bg = Img(r, UiKit.RoundRect(12), UiKit.Hex("6a7284"));
+        bg.type = Image.Type.Sliced;
+        Anchor(bg.rectTransform, 0.08f, 0.08f, 0.92f, 0.92f);
+        for (int i = 0; i < 4; i++)
+        {
+            var tooth = Img(bg.rectTransform, null, UiKit.Hex("e8eaf2")).rectTransform;
+            tooth.anchorMin = tooth.anchorMax = new Vector2(0.5f, 0.5f);
+            tooth.sizeDelta = new Vector2(16, 62);
+            tooth.localRotation = Quaternion.Euler(0, 0, i * 45f);
+        }
+        var ring = Img(bg.rectTransform, UiKit.Circle(), UiKit.Hex("e8eaf2")).rectTransform;
+        ring.anchorMin = ring.anchorMax = new Vector2(0.5f, 0.5f);
+        ring.sizeDelta = new Vector2(44, 44);
+        var hole = Img(bg.rectTransform, UiKit.Circle(), UiKit.Hex("6a7284")).rectTransform;
+        hole.anchorMin = hole.anchorMax = new Vector2(0.5f, 0.5f);
+        hole.sizeDelta = new Vector2(18, 18);
+    }
 
     void IconFolder(RectTransform r)
     {

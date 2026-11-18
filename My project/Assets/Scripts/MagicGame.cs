@@ -252,6 +252,7 @@ public partial class MagicGame : MonoBehaviour
         log.Clear();
         AddLog(currentRequest.Client + "のパソコンにつないだ！ 左のロボットから順に行動を決めよう");
         if (carried > 0) AddLog("前に組んだプログラムを " + carried + " 人にセットした。「前と同じで決定」ですぐ決められる");
+        if (currentRequest.Hint != "") AddLog("ヒント：" + currentRequest.Hint);
         StartCommandRound();
         BuildUnits();
         programScreen.SetActive(false);
@@ -1886,67 +1887,117 @@ public partial class MagicGame : MonoBehaviour
         requestLayer.gameObject.SetActive(false);
     }
 
+    Request shownRequest;   // 依頼一覧の右に出している依頼
+
+    // 依頼一覧：左に一覧（タイトル・★・最高ランク）、右に選んだ依頼の詳しい内容
     void RebuildRequestCards()
     {
         ClearChildren(requestCards);
-        int n = Requests.All.Length;
-        for (int i = 0; i < n; i++)
+        if (shownRequest == null) shownRequest = System.Array.Find(Requests.All, x => !IsCleared(x)) ?? Requests.All[0];
+        var listBg = Img(requestCards, UiKit.RoundRect(22), new Color(1, 1, 1, 0.55f));
+        listBg.type = Image.Type.Sliced;
+        Anchor(listBg.rectTransform, 0, 0, 0.42f, 1);
+        var list = NewRect(listBg.rectTransform, "List");
+        Anchor(list, 0, 0, 1, 1, 12, 12, -12, -12);
+        AddVertical(list, 8);
+        foreach (var req in Requests.All)
         {
-            var r = Requests.All[i];
-            var border = Img(requestCards, UiKit.RoundRect(28), IsCleared(r) ? UiKit.Hex("2fae4a") : r.IsBoss ? Magenta : Purple);
-            border.type = Image.Type.Sliced;
-            Anchor(border.rectTransform, i / (float)n + 0.005f, 0, (i + 1) / (float)n - 0.005f, 1);
-            var card = Img(border.rectTransform, UiKit.RoundRect(24), new Color(1, 1, 1, 0.95f));
-            card.type = Image.Type.Sliced;
-            var c = card.rectTransform;
-            Anchor(c, 0, 0, 1, 1, 6, 6, -6, -6);
-
-            // 差出人（メールのような見た目）
-            var mail = Img(c, UiKit.RoundRect(8), Pink);
-            mail.type = Image.Type.Sliced;
-            Anchor(mail.rectTransform, 0, 1, 0, 1, 24, -84, 84, -24);
-            MakeText(mail.rectTransform, "依頼", 22, Color.white, TextAnchor.MiddleCenter, true);
-            var from = MakeText(c, r.Client + " さんから", 24, Ink, TextAnchor.MiddleLeft, true);
-            Anchor(from.rectTransform, 0, 1, 1, 1, 100, -84, -10, -24);
-            var stars = MakeText(c, new string('★', r.Stars) + new string('☆', 3 - r.Stars), 28, UiKit.Hex("f0a800"), TextAnchor.MiddleLeft, true);
-            Anchor(stars.rectTransform, 0, 1, 1, 1, 24, -126, -10, -88);
-            var title = MakeText(c, r.Title, 28, r.IsBoss ? Magenta : Purple, TextAnchor.UpperLeft, true);
-            Anchor(title.rectTransform, 0, 1, 1, 1, 20, -210, -16, -132);
-            var msg = MakeText(c, r.Message, 20, Ink, TextAnchor.UpperLeft, false);
-            Anchor(msg.rectTransform, 0, 0.36f, 1, 1, 20, 0, -16, -214);
-            if (r.IsBoss)
-            {
-                var tag = Img(c, UiKit.Slant(), Magenta);
-                tag.type = Image.Type.Sliced;
-                Anchor(tag.rectTransform, 1, 1, 1, 1, -170, -128, -10, -88);
-                MakeText(tag.rectTransform, "強敵戦 ×" + r.Waves.Length, 22, Color.white, TextAnchor.MiddleCenter, true);
-            }
-
-            // いるウイルス
-            var vl = MakeText(c, r.IsBoss ? "最初のウイルス（奥にまだいる…）" : "見つかったウイルス", 19, UiKit.Hex("6a5a80"), TextAnchor.LowerLeft, true);
-            Anchor(vl.rectTransform, 0, 0.3f, 1, 0.36f, 20, 0, -16, 0);
-            for (int k = 0; k < r.Enemies.Length; k++)
-            {
-                var e = r.Enemies[k];
-                var slot = Img(c, UiKit.RoundRect(14), UiKit.Hex("2a1e3a"));
-                slot.type = Image.Type.Sliced;
-                Anchor(slot.rectTransform, 0.05f + k * 0.31f, 0.15f, 0.33f + k * 0.31f, 0.29f);
-                var art = Img(slot.rectTransform, UiKit.Art(e.Art), Color.white);
-                art.preserveAspect = true;
-                Anchor(art.rectTransform, 0, 0, 1, 1, 8, 8, -8, -8);
-            }
-            var go = CommandButton(c, IsCleared(r) ? "もう一度行く" : "助けに行く", 28, () => OnRequestChosen(r), true);
-            Anchor((RectTransform)go.transform, 0.12f, 0.02f, 0.96f, 0.12f);
-            if (IsCleared(r))
-            {
-                var stamp = Img(c, UiKit.RoundRect(12), new Color(0.18f, 0.68f, 0.29f, 0.9f));
-                stamp.type = Image.Type.Sliced;
-                stamp.rectTransform.anchorMin = stamp.rectTransform.anchorMax = new Vector2(0.78f, 0.62f);
-                stamp.rectTransform.sizeDelta = new Vector2(150, 56);
-                stamp.rectTransform.localRotation = Quaternion.Euler(0, 0, 12f);
-                MakeText(stamp.rectTransform, "駆除ずみ", 28, Color.white, TextAnchor.MiddleCenter, true);
-            }
+            var r = req;
+            bool sel = r == shownRequest;
+            var row = Img(list, UiKit.RoundRect(14), sel ? (r.IsBoss ? Magenta : Purple) : Color.white);
+            row.type = Image.Type.Sliced;
+            row.raycastTarget = true;
+            row.gameObject.AddComponent<LayoutElement>().preferredHeight = 100;
+            var b = row.gameObject.AddComponent<Button>();
+            b.targetGraphic = row;
+            b.onClick.AddListener(() => { shownRequest = r; RebuildRequestCards(); });
+            var tc = sel ? Color.white : Ink;
+            var t1 = MakeText(row.rectTransform, r.Client + " さんから" + (r.IsBoss ? "　<color=#ffd84a>強敵戦</color>" : ""), 20, sel ? Color.white : UiKit.Hex("6a5a80"), TextAnchor.UpperLeft, true);
+            t1.supportRichText = true;
+            Anchor(t1.rectTransform, 0, 0, 1, 1, 18, 8, -150, -10);
+            var t2 = MakeText(row.rectTransform, r.Title, 26, tc, TextAnchor.LowerLeft, true);
+            Anchor(t2.rectTransform, 0, 0, 1, 1, 18, 12, -150, -8);
+            var st = MakeText(row.rectTransform, new string('★', r.Stars) + new string('☆', 3 - r.Stars), 22, UiKit.Hex("f0a800"), TextAnchor.UpperRight, true);
+            Anchor(st.rectTransform, 0, 0, 1, 1, 0, 8, -16, -10);
+            RankBadge(row.rectTransform, BestRank(r), new Vector2(1, 0), new Vector2(-50, 30), 0.8f);
         }
+
+        // 右：くわしい内容
+        var r0 = shownRequest;
+        var border = Img(requestCards, UiKit.RoundRect(28), r0.IsBoss ? Magenta : Purple);
+        border.type = Image.Type.Sliced;
+        Anchor(border.rectTransform, 0.44f, 0, 1, 1);
+        var card = Img(border.rectTransform, UiKit.RoundRect(24), new Color(1, 1, 1, 0.96f));
+        card.type = Image.Type.Sliced;
+        var c = card.rectTransform;
+        Anchor(c, 0, 0, 1, 1, 6, 6, -6, -6);
+        var mail = Img(c, UiKit.RoundRect(8), Pink);
+        mail.type = Image.Type.Sliced;
+        Anchor(mail.rectTransform, 0, 1, 0, 1, 24, -84, 84, -24);
+        MakeText(mail.rectTransform, "依頼", 22, Color.white, TextAnchor.MiddleCenter, true);
+        var from = MakeText(c, r0.Client + " さんから　" + "<color=#f0a800>" + new string('★', r0.Stars) + new string('☆', 3 - r0.Stars) + "</color>", 28, Ink, TextAnchor.MiddleLeft, true);
+        from.supportRichText = true;
+        Anchor(from.rectTransform, 0, 1, 1, 1, 100, -84, -20, -24);
+        var title = MakeText(c, r0.Title, 40, r0.IsBoss ? Magenta : Purple, TextAnchor.UpperLeft, true);
+        Anchor(title.rectTransform, 0, 1, 1, 1, 24, -150, -24, -96);
+        var msg = MakeText(c, r0.Message, 24, Ink, TextAnchor.UpperLeft, false);
+        Anchor(msg.rectTransform, 0, 0.6f, 1, 1, 24, 0, -24, -156);
+        var hintBg = Img(c, UiKit.RoundRect(14), UiKit.Hex("fff4d8"));
+        hintBg.type = Image.Type.Sliced;
+        Anchor(hintBg.rectTransform, 0, 0.43f, 1, 0.6f, 20, 0, -20, -6);
+        var hint = MakeText(hintBg.rectTransform, "<color=#d08000>ヒント</color>　" + r0.Hint, 22, Ink, TextAnchor.MiddleLeft, true);
+        hint.supportRichText = true;
+        Anchor(hint.rectTransform, 0, 0, 1, 1, 18, 4, -18, -4);
+        var vl = MakeText(c, r0.IsBoss ? "最初のウイルス（奥にまだいる…）" : "見つかったウイルス", 20, UiKit.Hex("6a5a80"), TextAnchor.LowerLeft, true);
+        Anchor(vl.rectTransform, 0, 0.37f, 1, 0.42f, 24, 0, -24, 0);
+        for (int k = 0; k < r0.Enemies.Length; k++)
+        {
+            var e = r0.Enemies[k];
+            var slot = Img(c, UiKit.RoundRect(14), UiKit.Hex("2a1e3a"));
+            slot.type = Image.Type.Sliced;
+            Anchor(slot.rectTransform, 0.04f + k * 0.2f, 0.16f, 0.22f + k * 0.2f, 0.36f);
+            var art = Img(slot.rectTransform, UiKit.Art(e.Art), Color.white);
+            art.preserveAspect = true;
+            Anchor(art.rectTransform, 0, 0.18f, 1, 1, 8, 4, -8, -6);
+            var nm = MakeText(slot.rectTransform, e.Name, 18, Color.white, TextAnchor.LowerCenter, true);
+            Anchor(nm.rectTransform, 0, 0, 1, 0.2f);
+        }
+        var goal = MakeText(c, "S ランクの目標：" + r0.ParTurns + " ターン以内・だれも倒れない\n最高ランク：", 22, Ink, TextAnchor.UpperLeft, true);
+        Anchor(goal.rectTransform, 0.66f, 0.16f, 1, 0.36f, 0, 0, -20, 0);
+        RankBadge(c, BestRank(r0), new Vector2(0.86f, 0.2f), Vector2.zero, 1.2f);
+        var go = CommandButton(c, IsCleared(r0) ? "もう一度行く" : "助けに行く", 34, () => OnRequestChosen(r0), true);
+        Anchor((RectTransform)go.transform, 0.4f, 0.02f, 0.97f, 0.13f);
+        if (IsCleared(r0))
+        {
+            var stamp = Img(c, UiKit.RoundRect(12), new Color(0.18f, 0.68f, 0.29f, 0.9f));
+            stamp.type = Image.Type.Sliced;
+            stamp.rectTransform.anchorMin = stamp.rectTransform.anchorMax = new Vector2(0.85f, 0.88f);
+            stamp.rectTransform.sizeDelta = new Vector2(170, 60);
+            stamp.rectTransform.localRotation = Quaternion.Euler(0, 0, 12f);
+            MakeText(stamp.rectTransform, "駆除ずみ", 30, Color.white, TextAnchor.MiddleCenter, true);
+        }
+    }
+
+    // ---- ランク（S・A・B） ----
+
+    static int BestRank(Request r) => PlayerPrefs.GetInt("rank_" + r.Id, 0);   // 0 = まだ、1 = B、2 = A、3 = S
+    static string RankLetter(int rank) => rank >= 3 ? "S" : rank == 2 ? "A" : rank == 1 ? "B" : "";
+    static Color RankColor(int rank) => rank >= 3 ? UiKit.Hex("ffb000") : rank == 2 ? UiKit.Hex("e0408a") : UiKit.Hex("4a8fe0");
+
+    // ランクの丸いバッジ（まだならなにも出さない）
+    void RankBadge(RectTransform parent, int rank, Vector2 anchor, Vector2 pos, float scale)
+    {
+        if (rank <= 0) return;
+        var b = Img(parent, UiKit.Circle(), RankColor(rank)).rectTransform;
+        b.anchorMin = b.anchorMax = anchor;
+        b.anchoredPosition = pos;
+        b.sizeDelta = new Vector2(64, 64) * scale;
+        var ol = b.gameObject.AddComponent<Outline>();
+        ol.effectColor = Color.white;
+        ol.effectDistance = new Vector2(3, -3);
+        var t = MakeText(b, RankLetter(rank), (int)(40 * scale), Color.white, TextAnchor.MiddleCenter, true);
+        t.fontStyle = FontStyle.BoldAndItalic;
+        AddOutline(t, new Color(0, 0, 0, 0.5f), 2f);
     }
 
     // ================= プログラム画面 =================

@@ -252,7 +252,12 @@ public partial class MagicGame
         var r = currentRequest;
         bool first = !IsCleared(r);
         PlayerPrefs.SetInt("clear_" + r.Id, 1);
+        // ランク：目標のターン数以内で、だれも倒れなければ S。目標＋2 ターン以内なら A。それより後は B
+        bool allAlive = battle.Allies.TrueForAll(a => a.Alive);
+        int rank = battle.Turn <= r.ParTurns && allAlive ? 3 : battle.Turn <= r.ParTurns + 2 ? 2 : 1;
+        if (rank > BestRank(r)) PlayerPrefs.SetInt("rank_" + r.Id, rank);
         int xp = first ? r.Xp : r.Xp / 2;
+        xp = (int)(xp * (rank == 3 ? 1.5f : rank == 2 ? 1.2f : 1f));   // S は 1.5 倍、A は 1.2 倍
         var levelsBefore = LevelMap();
         var xpBefore = new Dictionary<string, int>();
         foreach (var c in Characters.All) xpBefore[c.Art] = GetXp(c.Art);
@@ -267,8 +272,11 @@ public partial class MagicGame
                 AddMail(r.Client, "また助けてくれてありがとう", r.Client + "です。また来てくれてうれしかった！\nちょっとだけど、お礼です。", "xp", 40);
         }
         yield return new WaitForSeconds(0.9f);
+        lastRank = rank;
         yield return CompleteCall(r, xp, xpBefore, levelsBefore, gift);
     }
+
+    int lastRank;
 
     IEnumerator CompleteCall(Request r, int xp, Dictionary<string, int> xpBefore, Dictionary<string, int> levelsBefore, bool gift)
     {
@@ -350,6 +358,16 @@ public partial class MagicGame
         StartCoroutine(ShakeRect(bw));
 
         // 経験値
+        // ランク（ハンコのとなり）
+        yield return new WaitForSeconds(0.2f);
+        var rankBox = NewRect(w, "Rank");
+        rankBox.anchorMin = rankBox.anchorMax = new Vector2(0.55f, 0.5f);
+        RankBadge(rankBox, lastRank, new Vector2(0.5f, 0.5f), Vector2.zero, 2.2f);
+        var rankNote = MakeText(w, "ランク　" + battle.Turn + " ターン（S の目標 " + r.ParTurns + " ターン）" + (lastRank == 3 ? "　EXP 1.5 倍！" : lastRank == 2 ? "　EXP 1.2 倍" : ""), 24, Color.white, TextAnchor.MiddleCenter, true);
+        Anchor(rankNote.rectTransform, 0.35f, 0.37f, 0.75f, 0.42f);
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.2f) { rankBox.localScale = Vector3.one * Mathf.Lerp(2f, 1f, t); yield return null; }
+        rankBox.localScale = Vector3.one;
+
         var xpTitle = MakeText(w, "EXP +" + xp, 52, UiKit.Hex("ffd84a"), TextAnchor.MiddleLeft, true);
         xpTitle.fontStyle = FontStyle.BoldAndItalic;
         AddOutline(xpTitle, Color.black, 3f);

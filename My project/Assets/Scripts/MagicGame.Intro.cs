@@ -25,6 +25,7 @@ public partial class MagicGame
     float lastIconClick = -10f;
     string lastIconName;
     bool introPlaying;
+    RectTransform gameIcon;   // デスクトップの「マジカルコンパイル」のアイコン（ウィンドウがここから開く）
 
     // ================= 3D のオープニング =================
 
@@ -289,6 +290,7 @@ public partial class MagicGame
         var b = rt.gameObject.AddComponent<Button>();
         b.transition = Selectable.Transition.None;
         b.onClick.AddListener(() => OnIconClicked(label, cell));
+        if (label == "マジカルコンパイル") gameIcon = rt;
     }
 
     void OnIconClicked(string label, Image cell)
@@ -323,30 +325,107 @@ public partial class MagicGame
         StartCoroutine(OpenWindow());
     }
 
+    // アプリの起動：アイコンがぴょこっと押され、そこからウィンドウが開いて、
+    // 大きなアイコンと名前・読み込みのバーが出る起動画面 → タイトルへ（ノイズは入れない）
     IEnumerator OpenWindow()
     {
         phase = Phase.Title;
         settingsWindow.gameObject.SetActive(false);
         toast.gameObject.SetActive(false);
-        var win = Img(desktopLayer, null, UiKit.Hex("ffd3ec")).rectTransform;
+
+        // アイコンを押した感じ
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.18f)
+        {
+            gameIcon.localScale = Vector3.one * (1f - 0.12f * Mathf.Sin(t * Mathf.PI));
+            yield return null;
+        }
+        gameIcon.localScale = Vector3.one;
+
+        // ウィンドウ（アイコンの位置から画面いっぱいに広がる）
+        var win = Img(desktopLayer, null, Color.white).rectTransform;
         win.anchorMin = win.anchorMax = new Vector2(0.5f, 0.5f);
+        var group = win.gameObject.AddComponent<CanvasGroup>();
+        var bg = NewRect(win, "Bg").gameObject.AddComponent<RawImage>();
+        Fill(bg.rectTransform);
+        bg.texture = UiKit.DiagonalGradient(UiKit.Hex("ffc3e6"), UiKit.Hex("b4e0ff"));
         var bar = Img(win, null, Pink).rectTransform;
         Anchor(bar, 0, 1, 1, 1, 0, -36, 0, 0);
         MakeText(bar, "　マジカルコンパイル", 20, Color.white, TextAnchor.MiddleLeft, true);
         MakeText(bar, "ー　□　×　", 20, Color.white, TextAnchor.MiddleRight, true);
-        var hat = Img(win, UiKit.Art("hat"), Color.white).rectTransform;
-        hat.sizeDelta = UiKit.ArtSize("hat") * 3f;
-        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.35f)
+        var content = NewRect(win, "Splash");
+        Fill(content);
+        content.gameObject.SetActive(false);
+
+        Vector3 from = gameIcon.TransformPoint(new Vector3(70, -60, 0));
+        Vector3 to = desktopLayer.TransformPoint(Vector3.zero);
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.32f)
         {
             float k = t * t * (3f - 2f * t);
-            win.sizeDelta = Vector2.Lerp(new Vector2(160, 120), new Vector2(1920, 1080), k);
+            win.sizeDelta = Vector2.Lerp(new Vector2(140, 110), new Vector2(1920, 1080), k);
+            win.position = Vector3.Lerp(from, to, k);
             yield return null;
         }
         win.sizeDelta = new Vector2(1920, 1080);
-        yield return new WaitForSeconds(0.25f);
+        win.position = to;
+
+        // 起動画面：大きなアイコン・名前・読み込みのバー
+        content.gameObject.SetActive(true);
+        var mc = Img(content, UiKit.MagicCircle(), new Color(1, 1, 1, 0.5f)).rectTransform;
+        mc.anchorMin = mc.anchorMax = new Vector2(0.5f, 0.6f);
+        mc.sizeDelta = new Vector2(560, 560);
+        var icon = NewRect(content, "AppIcon");
+        icon.anchorMin = icon.anchorMax = new Vector2(0.5f, 0.6f);
+        icon.sizeDelta = new Vector2(280, 280);
+        IconGame(icon);
+        var name = MakeText(content, "マジカルコンパイル", 84, Pink, TextAnchor.MiddleCenter, true);
+        Anchor(name.rectTransform, 0, 0.3f, 1, 0.42f);
+        AddOutline(name, Color.white, 5f);
+        var ver = MakeText(content, "ver 0.1", 24, UiKit.Hex("6a5a80"), TextAnchor.MiddleCenter, false);
+        Anchor(ver.rectTransform, 0, 0.26f, 1, 0.3f);
+        var barBack = Img(content, UiKit.RoundRect(12), new Color(1, 1, 1, 0.8f));
+        barBack.type = Image.Type.Sliced;
+        Anchor(barBack.rectTransform, 0.32f, 0.17f, 0.68f, 0.195f);
+        var fill = Img(barBack.rectTransform, UiKit.RoundRect(12), Pink);
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Horizontal;
+        Fill(fill.rectTransform);
+        var status = MakeText(content, "", 26, Ink, TextAnchor.MiddleCenter, false);
+        Anchor(status.rectTransform, 0, 0.11f, 1, 0.16f);
+
+        string[] steps = { "起動しています", "魔法のブロックを読み込んでいます", "AI ロボットを呼び出しています", "依頼を確認しています" };
+        float dur = 2.2f;
+        for (float t = 0f; t < dur; t += Time.deltaTime)
+        {
+            float k = t / dur;
+            // アイコンはぽんっと出てから、ふわふわ
+            float pop = t < 0.35f ? Mathf.Sin(t / 0.35f * Mathf.PI * 0.5f) * 1.12f : 1f + 0.04f * Mathf.Sin(t * 4f);
+            if (t > 0.35f && t < 0.5f) pop = Mathf.Lerp(1.12f, 1f, (t - 0.35f) / 0.15f);
+            icon.localScale = Vector3.one * pop;
+            mc.localRotation = Quaternion.Euler(0, 0, t * 30f);
+            fill.fillAmount = Mathf.Clamp01(k * 1.05f);
+            int dots = (int)(t * 3f) % 4;
+            status.text = steps[Mathf.Min(steps.Length - 1, (int)(k * steps.Length))] + new string('.', dots) + "　" + Mathf.Min(100, (int)(k * 105)) + "%";
+            yield return null;
+        }
+        fill.fillAmount = 1f;
+
+        // タイトルへ（起動画面がすっと消える）
+        titleLayer.gameObject.SetActive(true);
+        for (int i = 0; i < desktopLayer.childCount; i++)
+        {
+            var c = desktopLayer.GetChild(i);
+            if (c != win) c.gameObject.SetActive(false);
+        }
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.4f)
+        {
+            group.alpha = 1f - t;
+            yield return null;
+        }
         Destroy(win.gameObject);
-        desktopLayer.gameObject.SetActive(false);
-        ShowTitle();
+        for (int i = 0; i < desktopLayer.childCount; i++) desktopLayer.GetChild(i).gameObject.SetActive(true);
+        settingsWindow.gameObject.SetActive(false);
+        toast.gameObject.SetActive(false);
+        ShowTitle(false);
     }
 
     void UpdateClock()

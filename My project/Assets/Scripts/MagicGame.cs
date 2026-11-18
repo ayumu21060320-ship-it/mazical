@@ -148,7 +148,9 @@ public partial class MagicGame : MonoBehaviour
         StartIntro();   // 3D のパソコン → デスクトップ → タイトル（MagicGame.Intro.cs）
     }
 
-    void ShowTitle()
+    void ShowTitle() => ShowTitle(true);
+
+    void ShowTitle(bool withNoise)
     {
         StopAllCoroutines();
         phase = Phase.Title;
@@ -158,7 +160,7 @@ public partial class MagicGame : MonoBehaviour
         battleLayer.gameObject.SetActive(false);
         programScreen.SetActive(false);
         ClearChildren(effects);
-        StartCoroutine(Noise(0.4f, 0.5f));
+        if (withNoise) StartCoroutine(Noise(0.4f, 0.5f));
     }
 
     void OnTitleStart()

@@ -6,6 +6,7 @@
 // 世界観: プレイヤーはプログラマー。パソコンの中でプログラムを組んで魔法を作り、AI ロボットに送ってウイルスを撃退する
 // キャラクターはドット絵（PixelArt.cs）。背景は電子回路の方眼をコードで描いている
 // アニメーション: 待機中のゆれ・まばたき、攻撃の踏み込み、魔法の弾、当たったときのゆれと火花、ウイルスが消える演出
+// ノイズ: ウイルスが侵入してくる登場演出（警告・砂嵐・色ずれ）、ウイルスの攻撃や待機中のちらつき
 
 using System.Collections;
 using System.Collections.Generic;
@@ -51,6 +52,9 @@ public class MagicGame : MonoBehaviour
     RectTransform root;
     RectTransform cardLayer; // キャラクターのカードを置く場所（プログラム画面より下）
     RectTransform effects;  // 魔法の弾・火花を置く場所（バトルの上、プログラム画面の下）
+    RectTransform noiseLayer;  // 画面全体のノイズ（砂嵐・横すじ・警告）
+    RawImage noise;
+    bool intro;             // ウイルスの登場演出中（ボタンを押せない）
 
     // バトル画面
     Text turnText, messageText, logText;
@@ -81,6 +85,7 @@ public class MagicGame : MonoBehaviour
         public float BlinkTimer;
         public int ShownHp;           // 画面に出している HP（弾が当たったときに減らす）
         public bool Dying, Dead;
+        public float GlitchTimer;     // ウイルスがときどきちらつくまでの時間
     }
 
     void Start()
@@ -107,6 +112,7 @@ public class MagicGame : MonoBehaviour
     {
         StopAllCoroutines();
         for (int i = effects.childCount - 1; i >= 0; i--) Destroy(effects.GetChild(i).gameObject);
+        for (int i = noiseLayer.childCount - 1; i >= 2; i--) Destroy(noiseLayer.GetChild(i).gameObject); // 走査線と砂嵐は残す
         busy = false;
         flying = 0;
         battle = new Battle(System.Environment.TickCount);
@@ -119,7 +125,9 @@ public class MagicGame : MonoBehaviour
         AddLog("パソコンにウイルスが侵入！ 「プログラムを組む」で魔法を作って撃退しよう");
         BuildUnitViews();
         programScreen.SetActive(false);
+        noise.color = new Color(1, 1, 1, 0);
         RefreshBattle();
+        StartCoroutine(Intro());
     }
 
     // ================= 毎フレーム =================
@@ -276,8 +284,8 @@ public class MagicGame : MonoBehaviour
             }
             c.Rect.GetComponent<CanvasGroup>().alpha = c.ShownHp > 0 ? 1f : 0.35f;
         }
-        programButton.interactable = phase == Phase.Planning;
-        startButton.interactable = phase == Phase.Planning;
+        programButton.interactable = phase == Phase.Planning && !intro;
+        startButton.interactable = phase == Phase.Planning && !intro;
         retryButton.gameObject.SetActive(phase == Phase.Finished);
     }
 
@@ -354,6 +362,12 @@ public class MagicGame : MonoBehaviour
             {
                 float k = 1f + Mathf.Sin(t * 2.5f + c.Phase) * 0.05f; // ウイルスはぷよぷよ
                 c.Art.localScale = new Vector3(k, 2f - k, 1f);
+                c.GlitchTimer -= Time.deltaTime;                       // ときどきちらつく
+                if (c.GlitchTimer <= 0f && !intro)
+                {
+                    c.GlitchTimer = Random.Range(2.5f, 6f);
+                    StartCoroutine(GlitchArt(c, 0.15f));
+                }
             }
             else if (c.Blink != null)
             {
@@ -394,6 +408,8 @@ public class MagicGame : MonoBehaviour
         }
         else
         {
+            StartCoroutine(Noise(0.3f, 0.45f));
+            StartCoroutine(GlitchArt(actor, 0.25f));
             foreach (var h in r.Hits) Impact(h, new Color(0.8f, 0.3f, 1f), false); // ウイルスの侵食
         }
 
@@ -512,6 +528,144 @@ public class MagicGame : MonoBehaviour
         c.ArtImage.enabled = false;
         c.Dying = false;
         c.Dead = true;
+    }
+
+    // ================= ノイズ（ウイルスの侵入） =================
+
+    // 登場演出：警告 → 砂嵐 → ウイルスが 1 体ずつ色ずれしながら現れる
+    IEnumerator Intro()
+    {
+        intro = true;
+        RefreshBattle();
+        foreach (var e in battle.Enemies) { var c = cards[e]; c.ArtImage.enabled = false; c.Dying = true; }
+
+        yield return new WaitForSeconds(0.3f);
+        var banner = Box(noiseLayer, new Color(0.75f, 0.05f, 0.15f, 0.9f), new Vector2(0, 0.52f), new Vector2(1, 0.64f));
+        banner.GetComponent<Image>().raycastTarget = false;
+        var bt = MakeText(banner, "WARNING　ウイルスの侵入を検知しました", 48, TextAnchor.MiddleCenter);
+        bt.fontStyle = FontStyle.Bold;
+        StartCoroutine(Noise(1.2f, 0.7f));
+        for (int i = 0; i < 6; i++)
+        {
+            banner.gameObject.SetActive(i % 2 == 0);
+            banner.anchoredPosition = new Vector2(Random.Range(-30f, 30f), 0);
+            yield return new WaitForSeconds(0.18f);
+        }
+        Destroy(banner.gameObject);
+
+        foreach (var e in battle.Enemies)
+        {
+            StartCoroutine(Noise(0.35f, 0.5f));
+            yield return Materialize(cards[e]);
+        }
+        intro = false;
+        RefreshBattle();
+    }
+
+    // ノイズの中からちらつきながら現れる
+    IEnumerator Materialize(UnitCard c)
+    {
+        c.ArtImage.enabled = true;
+        StartCoroutine(GlitchArt(c, 0.45f));
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.45f)
+        {
+            if (c.Art == null) yield break;
+            c.ArtImage.enabled = Random.value < 0.3f + t * 0.7f;
+            float sy = Mathf.Min(1.15f, t * 1.4f);
+            c.Art.localScale = new Vector3(1f + (1f - t) * Random.Range(0f, 0.6f), Mathf.Max(0.05f, sy), 1f);
+            c.Art.anchoredPosition = new Vector2(Random.Range(-20f, 20f) * (1f - t), 0);
+            yield return null;
+        }
+        c.ArtImage.enabled = true;
+        c.Art.localScale = Vector3.one;
+        c.Dying = false;
+    }
+
+    // 絵の色ずれ（水色と赤紫の写しが横にずれて、ずれが戻る）
+    IEnumerator GlitchArt(UnitCard c, float dur)
+    {
+        if (c.Art == null || c.Dead) yield break;
+        var ghosts = new List<Image>();
+        foreach (var col in new[] { new Color(0f, 1f, 1f, 0.6f), new Color(1f, 0f, 0.8f, 0.6f) })
+        {
+            var go = new GameObject("Glitch", typeof(RectTransform), typeof(Image));
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(c.Art, false);
+            Place(rt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            var img = go.GetComponent<Image>();
+            img.sprite = c.ArtImage.sprite;
+            img.preserveAspect = true;
+            img.color = col;
+            img.raycastTarget = false;
+            ghosts.Add(img);
+        }
+        for (float t = 0f; t < 1f; t += Time.deltaTime / dur)
+        {
+            float d = (1f - t) * 14f;
+            for (int i = 0; i < ghosts.Count; i++)
+            {
+                if (ghosts[i] == null) yield break;
+                ghosts[i].rectTransform.anchoredPosition = new Vector2((i == 0 ? -d : d) + Random.Range(-3f, 3f), Random.Range(-2f, 2f));
+            }
+            yield return null;
+        }
+        foreach (var g in ghosts) if (g != null) Destroy(g.gameObject);
+    }
+
+    // 画面全体の砂嵐と横すじ。strength は 0〜1
+    IEnumerator Noise(float dur, float strength)
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / dur)
+        {
+            float k = strength * (1f - t);
+            noise.color = new Color(1, 1, 1, k * Random.Range(0.2f, 0.6f));
+            noise.uvRect = new Rect(Random.value, Random.value, 1920f / 4f / 160f, 1080f / 4f / 90f);
+            if (Random.value < k) StartCoroutine(Streak(k));
+            yield return null;
+        }
+        noise.color = new Color(1, 1, 1, 0);
+    }
+
+    // 一瞬だけ出る横すじ
+    IEnumerator Streak(float k)
+    {
+        var colors = new[] { new Color(0f, 1f, 1f), new Color(1f, 0f, 0.8f), Color.white, new Color(0.3f, 1f, 0.4f) };
+        var c = colors[Random.Range(0, colors.Length)];
+        c.a = Random.Range(0.2f, 0.6f);
+        float y = Random.value;
+        float h = Random.Range(0.004f, 0.03f + 0.04f * k);
+        float x0 = Random.Range(-0.2f, 0.4f);
+        var bar = Box(noiseLayer, c, new Vector2(x0, y), new Vector2(x0 + Random.Range(0.3f, 1f), Mathf.Min(1f, y + h)));
+        bar.GetComponent<Image>().raycastTarget = false;
+        yield return new WaitForSeconds(Random.Range(0.04f, 0.12f));
+        Destroy(bar.gameObject);
+    }
+
+    // 砂嵐（白黒のランダムな点。点の大きさを出すため小さく作って引きのばす）
+    static Texture2D StaticTexture()
+    {
+        var tex = new Texture2D(160, 90, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        for (int y = 0; y < 90; y++)
+            for (int x = 0; x < 160; x++)
+            {
+                float v = Random.value;
+                tex.SetPixel(x, y, new Color(v, v, v, Random.value < 0.5f ? 0f : 1f));
+            }
+        tex.Apply();
+        return tex;
+    }
+
+    // うっすら走査線（4 ドットに 1 本、暗い線）
+    static Texture2D ScanlineTexture()
+    {
+        var tex = new Texture2D(1, 4, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        for (int y = 0; y < 4; y++) tex.SetPixel(0, y, new Color(0, 0, 0, y == 0 ? 0.12f : 0f));
+        tex.Apply();
+        return tex;
     }
 
     // 火花（小さな四角が飛び散って消える）
@@ -636,6 +790,27 @@ public class MagicGame : MonoBehaviour
         effects = Box(root, new Color(0, 0, 0, 0), Vector2.zero, Vector2.one);
         effects.name = "Effects";
         effects.GetComponent<Image>().raycastTarget = false;
+
+        // ノイズ：砂嵐のテクスチャ（ふだんは透明）と、うっすら走査線
+        noiseLayer = Box(root, new Color(0, 0, 0, 0), Vector2.zero, Vector2.one);
+        noiseLayer.name = "Noise";
+        noiseLayer.GetComponent<Image>().raycastTarget = false;
+        var scan = new GameObject("Scanlines", typeof(RectTransform), typeof(RawImage));
+        var scanRt = (RectTransform)scan.transform;
+        scanRt.SetParent(noiseLayer, false);
+        Place(scanRt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        var scanImg = scan.GetComponent<RawImage>();
+        scanImg.texture = ScanlineTexture();
+        scanImg.uvRect = new Rect(0, 0, 1, 1080f / 4f);
+        scanImg.raycastTarget = false;
+        var nz = new GameObject("Static", typeof(RectTransform), typeof(RawImage));
+        var nzRt = (RectTransform)nz.transform;
+        nzRt.SetParent(noiseLayer, false);
+        Place(nzRt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        noise = nz.GetComponent<RawImage>();
+        noise.texture = StaticTexture();
+        noise.color = new Color(1, 1, 1, 0);
+        noise.raycastTarget = false;
         BuildProgramScreen();
     }
 
@@ -698,7 +873,7 @@ public class MagicGame : MonoBehaviour
         {
             Rect = rect, Frame = frame, HpFill = hpFill, HpText = hpText, InfoText = info,
             Art = artRt, ArtImage = artImg, Normal = artImg.sprite, Blink = u.IsAlly ? PixelSprite(u.Art, false, true) : null,
-            Phase = Random.Range(0f, 6.28f), BlinkTimer = Random.Range(1f, 4f), ShownHp = u.Hp,
+            Phase = Random.Range(0f, 6.28f), GlitchTimer = Random.Range(2f, 5f), BlinkTimer = Random.Range(1f, 4f), ShownHp = u.Hp,
         };
         return card;
     }

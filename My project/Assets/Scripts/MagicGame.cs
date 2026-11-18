@@ -1375,7 +1375,7 @@ public partial class MagicGame : MonoBehaviour
         float ph = Random.value * 6f, blink = Random.Range(1f, 4f);
         var idle = UiKit.Art(art);
         var closed = UiKit.Art(art.Replace("_idle", "_blink"));
-        while (true)
+        while (rt != null && img != null)   // 絵が消えたら止める
         {
             rt.anchoredPosition = start + new Vector2(0, Mathf.Round(Mathf.Sin(Time.time * 2.4f + ph) * 0.5f + 0.5f) * scale);
             blink -= Time.deltaTime;
@@ -1387,12 +1387,13 @@ public partial class MagicGame : MonoBehaviour
 
     IEnumerator TitleGlitch(RectTransform rt, float dx)
     {
-        while (true)
+        while (rt != null)
         {
             rt.anchoredPosition = new Vector2(dx, 0);
             yield return new WaitForSeconds(Random.Range(1.5f, 3.5f));
             for (int i = 0; i < 6; i++)
             {
+                if (rt == null) yield break;
                 rt.anchoredPosition = new Vector2(dx * Random.Range(1f, 4f), Random.Range(-6f, 6f));
                 yield return new WaitForSeconds(0.04f);
             }
@@ -1401,14 +1402,14 @@ public partial class MagicGame : MonoBehaviour
 
     IEnumerator SpinForever(RectTransform rt, float speed)
     {
-        while (true) { rt.localRotation = Quaternion.Euler(0, 0, Time.time * speed); yield return null; }
+        while (rt != null) { rt.localRotation = Quaternion.Euler(0, 0, Time.time * speed); yield return null; }
     }
 
     IEnumerator Float(RectTransform rt)
     {
         var img = rt.GetComponent<Image>();
         float ph = Random.value * 10f, sp = Random.Range(0.02f, 0.06f);
-        while (true)
+        while (rt != null && img != null)
         {
             var a = rt.anchorMin;
             a.y += sp * Time.deltaTime;
@@ -1421,12 +1422,12 @@ public partial class MagicGame : MonoBehaviour
 
     IEnumerator Pulse(RectTransform rt)
     {
-        while (true) { rt.localScale = Vector3.one * (1f + 0.03f * Mathf.Sin(Time.time * 4f)); yield return null; }
+        while (rt != null) { rt.localScale = Vector3.one * (1f + 0.03f * Mathf.Sin(Time.time * 4f)); yield return null; }
     }
 
     IEnumerator BlinkText(Text t)
     {
-        while (true) { t.color = new Color(t.color.r, t.color.g, t.color.b, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)); yield return null; }
+        while (t != null) { t.color = new Color(t.color.r, t.color.g, t.color.b, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)); yield return null; }
     }
 
     // ロゴの横の IC チップ

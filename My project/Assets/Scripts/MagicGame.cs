@@ -403,22 +403,42 @@ public partial class MagicGame : MonoBehaviour
     int targetOriginal;
     bool programSliding;
 
-    // プログラム画面ごと横にすべらせる。out = true で左へ出ていく、false で右からもどってくる
-    IEnumerator SlideProgram(bool slideOut)
+    RawImage programBg;
+    GameObject programCircle, programSide;
+    CanvasGroup programCodeGroup;
+
+    // 敵を選ぶとき：プログラム画面ごと左へすべらせて、コードの部分だけを画面の左半分に残す（右半分は戦闘画面）。
+    // toHalf = false で右へすべって元の位置にもどる
+    IEnumerator SlideProgram(bool toHalf)
     {
         programSliding = true;
         var rt = (RectTransform)programScreen.transform;
         float w = Mathf.Max(root.rect.width, 1920f);
+        float half = -0.26f * w;   // コードの左はしが画面の左はしに来るくらい
         programScreen.SetActive(true);
-        float from = slideOut ? 0f : w, to = slideOut ? -w : 0f;
+        if (toHalf)
+        {
+            // うしろの背景と右の欄を消して、戦闘画面が見えるようにする
+            programBg.enabled = false;
+            programCircle.SetActive(false);
+            programSide.SetActive(false);
+            programCodeGroup.blocksRaycasts = false;   // 選んでいるあいだはコードをさわれない
+        }
+        float from = toHalf ? 0f : half, to = toHalf ? half : 0f;
         for (float t = 0; t < 1f; t += Time.deltaTime / 0.3f)
         {
-            float k = slideOut ? t * t * t : 1f - (1f - t) * (1f - t) * (1f - t);   // 出るときは加速、もどるときは減速
+            float k = 1f - (1f - t) * (1f - t) * (1f - t);
             rt.anchoredPosition = new Vector2(Mathf.Lerp(from, to, k), 0);
             yield return null;
         }
-        rt.anchoredPosition = Vector2.zero;
-        if (slideOut) programScreen.SetActive(false);
+        rt.anchoredPosition = new Vector2(to, 0);
+        if (!toHalf)
+        {
+            programBg.enabled = true;
+            programCircle.SetActive(true);
+            programSide.SetActive(true);
+            programCodeGroup.blocksRaycasts = true;
+        }
         programSliding = false;
     }
 
@@ -437,8 +457,8 @@ public partial class MagicGame : MonoBehaviour
             targetPanel = dim.gameObject;
             var band = Img(dim, UiKit.Slant(), new Color(0.05f, 0.02f, 0.08f, 0.92f));
             band.type = Image.Type.Sliced;
-            Anchor(band.rectTransform, 0.2f, 0.84f, 0.8f, 0.94f);
-            var t = MakeText(band.rectTransform, "攻撃する敵をクリック！ <size=24>（もう一度押すと外れる・何体でも選べる）</size>", 34, Color.white, TextAnchor.MiddleCenter, true);
+            Anchor(band.rectTransform, 0.44f, 0.84f, 0.99f, 0.95f);
+            var t = MakeText(band.rectTransform, "攻撃する敵をクリック！\n<size=22>もう一度押すと外れる・何体でも選べる</size>", 32, Color.white, TextAnchor.MiddleCenter, true);
             t.supportRichText = true;
             var ok = CommandButton(dim, "決定", 40, ConfirmTargets, true);
             Anchor((RectTransform)ok.transform, 0.62f, 0.04f, 0.82f, 0.13f);
@@ -2374,7 +2394,9 @@ public partial class MagicGame : MonoBehaviour
         programScreen = screen.gameObject;
         var bg = screen.gameObject.AddComponent<RawImage>();
         bg.texture = UiKit.DiagonalGradient(UiKit.Hex("ffc3e6"), UiKit.Hex("b4e0ff"));
+        programBg = bg;
         var mc = Img(screen, UiKit.MagicCircle(), new Color(1, 1, 1, 0.35f)).rectTransform;
+        programCircle = mc.gameObject;
         mc.anchorMin = mc.anchorMax = new Vector2(0.88f, 0.2f);
         mc.sizeDelta = new Vector2(700, 700);
         ambient.StartCoroutine(SpinForever(mc, 5f));
@@ -2444,6 +2466,9 @@ public partial class MagicGame : MonoBehaviour
         codeBg.type = Image.Type.Sliced;
         Anchor(codeBg.rectTransform, 0.39f, 0.03f, 0.98f, 0.97f);
         codeArea = codeBg.rectTransform;
+        programCodeGroup = codeBg.gameObject.AddComponent<CanvasGroup>();
+        programCodeGroup.alpha = 1f;
+        programCodeGroup.blocksRaycasts = true;
         var cTitle = MakeText(codeArea, "コード", 30, Ink, TextAnchor.UpperLeft, false);
         Anchor(cTitle.rectTransform, 0, 1, 1, 1, 18, -56, 0, -12);
         codeList = ScrollArea(codeArea, 34, 16, -34, -64, -UiKit.BlockTabHeight + 2f);   // 下の出っぱりを次のブロックのへこみに重ねる
@@ -2455,6 +2480,7 @@ public partial class MagicGame : MonoBehaviour
         side.type = Image.Type.Sliced;
         var sideRt = side.rectTransform;
         Anchor(sideRt, 0.68f, 0.03f, 0.985f, 0.87f);
+        programSide = side.gameObject;
         partnerPortrait = Img(sideRt, null, new Color(0.95f, 0.95f, 1f));
         partnerPortrait.preserveAspect = true;
         Anchor(partnerPortrait.rectTransform, 0.2f, 0.55f, 0.52f, 0.86f);

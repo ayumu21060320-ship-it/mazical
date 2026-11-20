@@ -202,7 +202,7 @@ public partial class MagicGame : MonoBehaviour
     void OnRequestChosen(Request r)
     {
         if (phase != Phase.Requests || connecting) return;
-        if (LoadParty().Count < Mathf.Min(3, Characters.All.Length))
+        if (!r.Tutorial && LoadParty().Count < Mathf.Min(3, Characters.All.Length))
         {
             StartCoroutine(Toast(requestLayer, "チーム編成で出撃メンバーを 3 人選んでください"));
             return;
@@ -234,7 +234,9 @@ public partial class MagicGame : MonoBehaviour
         noise.color = new Color(1, 1, 1, 0);
         busy = false;
         flying = 0;
-        battle = new Battle(System.Environment.TickCount, currentRequest, LevelMap(), MemoryBonus, LoadoutMap(), LoadParty());
+        // チュートリアルはレッド1人だけで戦う（操作を1人分だけ覚えればいいように）
+        var party = currentRequest.Tutorial ? new List<string> { Characters.All[0].Art } : LoadParty();
+        battle = new Battle(System.Environment.TickCount, currentRequest, LevelMap(), MemoryBonus, LoadoutMap(), party);
         drafts.Clear();
         linkDrafts.Clear();
         int carried = 0;
@@ -290,56 +292,187 @@ public partial class MagicGame : MonoBehaviour
         UpdateTutorialGuide();
     }
 
-    // ================= チュートリアルの案内（はじめての依頼だけ、画面の上に次にやることを出す） =================
+    // ================= チュートリアル（はじめての依頼だけ）=================
+    // 次に押すボタンだけを明るく残して、まわりを暗くする（暗い所は押せない）。枠と矢印で強調し、上に指示を出す
 
+    RectTransform sendButtonRt, targetOkRt;
+    RectTransform tutLayer, tutFrame, tutArrow;
+    readonly RectTransform[] tutDim = new RectTransform[4];
     GameObject guideBox;
     Text guideText;
+
+    void BuildTutorialLayer()
+    {
+        tutLayer = NewRect(root, "Tutorial");
+        Fill(tutLayer);
+        tutLayer.pivot = new Vector2(0.5f, 0.5f);
+        for (int i = 0; i < 4; i++)
+        {
+            var d = Img(tutLayer, null, new Color(0f, 0f, 0.05f, 0.72f));
+            d.raycastTarget = true;   // 暗い所のクリックを止める
+            var rt = d.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = Vector2.zero;
+            tutDim[i] = rt;
+        }
+        // 強調の枠（4本の線）
+        tutFrame = NewRect(tutLayer, "Frame");
+        tutFrame.anchorMin = tutFrame.anchorMax = new Vector2(0.5f, 0.5f);
+        tutFrame.pivot = Vector2.zero;
+        for (int i = 0; i < 4; i++)
+        {
+            var bar = Img(tutFrame, null, UiKit.Hex("ffd84a")).rectTransform;
+            bar.GetComponent<Image>().raycastTarget = false;
+            if (i < 2) Anchor(bar, 0, i, 1, i, -6, i == 0 ? -6 : 0, 6, i == 0 ? 0 : 6);
+            else Anchor(bar, i - 2, 0, i - 2, 1, i == 2 ? -6 : 0, -6, i == 2 ? 0 : 6, 6);
+        }
+        var arrow = Img(tutLayer, UiKit.Arrow(), UiKit.Hex("ffd84a"));
+        arrow.raycastTarget = false;
+        tutArrow = arrow.rectTransform;
+        tutArrow.anchorMin = tutArrow.anchorMax = new Vector2(0.5f, 0.5f);
+        tutArrow.sizeDelta = new Vector2(90, 70);
+        var aol = arrow.gameObject.AddComponent<Outline>();
+        aol.effectColor = UiKit.Hex("8a5a00");
+        aol.effectDistance = new Vector2(3, -3);
+
+        var box = Img(tutLayer, UiKit.Slant(), new Color(1f, 0.85f, 0.2f, 0.98f));
+        box.type = Image.Type.Sliced;
+        box.raycastTarget = false;
+        Anchor(box.rectTransform, 0.22f, 0.885f, 0.98f, 0.975f);
+        guideBox = box.gameObject;
+        var navi = MakeText(box.rectTransform, "ナビ", 26, Color.white, TextAnchor.MiddleCenter, true);
+        AddOutline(navi, UiKit.Hex("8a5a00"), 2f);
+        Anchor(navi.rectTransform, 0.02f, 0, 0.1f, 1);
+        guideText = MakeText(box.rectTransform, "", 28, Ink, TextAnchor.MiddleLeft, true);
+        Anchor(guideText.rectTransform, 0.11f, 0, 0.97f, 1);
+    }
 
     void UpdateTutorialGuide()
     {
         bool on = battle != null && currentRequest != null && currentRequest.Tutorial && battleLayer.gameObject.activeSelf
                   && (phase == Phase.Planning || phase == Phase.Running) && battleLayer.Find("Call") == null;
-        if (!on) { if (guideBox != null) guideBox.SetActive(false); return; }
-        if (guideBox == null)
+        if (!on) { if (tutLayer != null) tutLayer.gameObject.SetActive(false); return; }
+        if (tutLayer == null) BuildTutorialLayer();
+        tutLayer.gameObject.SetActive(true);
+        tutLayer.SetAsLastSibling();
+        var holes = new List<RectTransform>();
+        guideText.text = TutorialStep(holes);
+        holes.RemoveAll(h => h == null || !h.gameObject.activeInHierarchy);
+
+        // 穴（押してよい所）：指定した部品をぜんぶ囲む四角。無ければ全部暗くする（何も押せない）
+        var area = tutLayer.rect;
+        Rect hole;
+        bool hasHole = holes.Count > 0;
+        if (hasHole)
         {
-            var box = Img(root, UiKit.Slant(), new Color(1f, 0.85f, 0.2f, 0.97f));
-            box.type = Image.Type.Sliced;
-            box.raycastTarget = false;
-            Anchor(box.rectTransform, 0.3f, 0.885f, 0.98f, 0.975f);
-            guideBox = box.gameObject;
-            var navi = MakeText(box.rectTransform, "ナビ", 26, Color.white, TextAnchor.MiddleCenter, true);
-            AddOutline(navi, UiKit.Hex("8a5a00"), 2f);
-            Anchor(navi.rectTransform, 0.02f, 0, 0.1f, 1);
-            guideText = MakeText(box.rectTransform, "", 26, Ink, TextAnchor.MiddleLeft, true);
-            Anchor(guideText.rectTransform, 0.11f, 0, 0.97f, 1);
+            float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+            foreach (var h in holes)
+            {
+                var r = h.rect;
+                foreach (var corner in new[] { new Vector3(r.xMin, r.yMin, 0), new Vector3(r.xMax, r.yMax, 0) })
+                {
+                    Vector2 p = tutLayer.InverseTransformPoint(h.TransformPoint(corner));
+                    x0 = Mathf.Min(x0, p.x); y0 = Mathf.Min(y0, p.y); x1 = Mathf.Max(x1, p.x); y1 = Mathf.Max(y1, p.y);
+                }
+            }
+            hole = new Rect(x0 - 10, y0 - 10, x1 - x0 + 20, y1 - y0 + 20);
         }
-        guideBox.SetActive(true);
-        guideBox.transform.SetAsLastSibling();
-        guideText.text = TutorialStep();
+        else hole = new Rect(area.center.x, area.yMax, 0, 0);
+        SetDim(tutDim[0], area.xMin, area.yMin, area.xMax, hole.yMin);           // 下
+        SetDim(tutDim[1], area.xMin, hole.yMax, area.xMax, area.yMax);           // 上
+        SetDim(tutDim[2], area.xMin, hole.yMin, hole.xMin, hole.yMax);           // 左
+        SetDim(tutDim[3], hole.xMax, hole.yMin, area.xMax, hole.yMax);           // 右
+        tutFrame.gameObject.SetActive(hasHole);
+        tutArrow.gameObject.SetActive(hasHole);
+        if (!hasHole) return;
+        tutFrame.anchoredPosition = hole.position;
+        tutFrame.sizeDelta = hole.size;
+        float pulse = 0.55f + 0.45f * Mathf.Abs(Mathf.Sin(Time.time * 4f));
+        foreach (var img in tutFrame.GetComponentsInChildren<Image>(true)) img.color = new Color(1f, 0.85f, 0.29f, pulse);
+        // 矢印：穴の上（上が窮屈なら下）から、ぴょこぴょこ指す
+        float bob = Mathf.Abs(Mathf.Sin(Time.time * 5f)) * 18f;
+        bool below = hole.yMax + 150 > area.yMax - area.height * 0.12f;
+        tutArrow.anchoredPosition = new Vector2(hole.center.x, below ? hole.yMin - 50 - bob : hole.yMax + 50 + bob);
+        tutArrow.localRotation = Quaternion.Euler(0, 0, below ? 90f : -90f);
     }
 
-    string TutorialStep()
+    static void SetDim(RectTransform rt, float x0, float y0, float x1, float y1)
     {
-        if (phase == Phase.Running) return "タイムラインの右端に着いたキャラから行動するよ。魔法が当たるのを見守ろう！";
+        rt.anchoredPosition = new Vector2(x0, y0);
+        rt.sizeDelta = new Vector2(Mathf.Max(0, x1 - x0), Mathf.Max(0, y1 - y0));
+    }
+
+    BlockView PaletteBlock(BlockKind k)
+    {
+        foreach (var bv in paletteList.GetComponentsInChildren<BlockView>(true)) if (bv.Data.Kind == k) return bv;
+        return null;
+    }
+
+    BlockView CodeBlock(BlockKind k)
+    {
+        foreach (var bv in codeList.GetComponentsInChildren<BlockView>(true)) if (bv.Data.Kind == k) return bv;
+        return null;
+    }
+
+    // いまの手順の指示と、押してよい部品
+    string TutorialStep(List<RectTransform> holes)
+    {
+        if (phase == Phase.Running) return "タイムラインの右端に着いたキャラから行動するよ。魔法が当たるのを見てみよう！";
         if (intro) return "ウイルスが出てきた…！";
-        if (targeting != null) return "攻撃したい敵をクリックしてロックオン！ 選んだら右下の「決定」を押そう";
-        if (programScreen.activeSelf && editing != null && !linkMode)
+        if (targeting != null)
         {
+            if (targetMask == 0 || programSliding)
+            {
+                foreach (var e in battle.Enemies) if (e.Alive && views.ContainsKey(e)) holes.Add(views[e].Art);
+                return "攻撃したい敵をクリックしてロックオンしよう";
+            }
+            holes.Add(targetOkRt);
+            return "ロックオンできた！ 「決定」を押そう";
+        }
+        if (programScreen.activeSelf && editing != null)
+        {
+            if (programSliding) return "";
             var code = CurrentCode();
             foreach (var k in Blocks.Order)
             {
                 if (k == BlockKind.Effect) continue;   // 追加効果は無くてもよい
                 var b = code.Find(x => x.Kind == k);
                 if (b == null)
+                {
+                    var pb = PaletteBlock(k);
+                    if (pb != null) holes.Add((RectTransform)pb.transform);
+                    holes.Add(codeArea);
                     return k == BlockKind.Element
-                        ? "左の「属性」のブロックを、右のコードの「スタート」の下へドラッグしよう（バグは炎が弱点）"
-                        : "次は「" + Blocks.KindName(k) + "」のブロックを、いちばん下へドラッグしよう";
-                if (k == BlockKind.Target && b.Value == 0) return "「対象」のブロックの ▼ を押して、攻撃する敵を選ぼう";
+                        ? "「属性」のブロックを、右のコードの「スタート」の下へドラッグしよう（バグは炎が弱点）"
+                        : "「" + Blocks.KindName(k) + "」のブロックを、コードのいちばん下へドラッグしよう";
+                }
+                if (k == BlockKind.Target && b.Value == 0)
+                {
+                    var cb = CodeBlock(BlockKind.Target);
+                    if (cb != null) holes.Add((RectTransform)cb.transform);
+                    return "「対象」のブロックの ▼ を押して、攻撃する敵を選ぼう";
+                }
             }
-            return "プログラムができた！ 右下の「送信」を押して、ロボットに魔法を送ろう";
+            string msg;
+            if (!Compiler.Check(code, ProgramCapacity(), out msg, linkMode))
+            {
+                holes.Add(codeArea);
+                return "順番がちがうみたい。属性 → 対象 → 威力 → 発射方法 の順にならべかえよう";
+            }
+            holes.Add(sendButtonRt);
+            return "プログラムができた！ 「送信」を押して、ロボットに魔法を送ろう";
         }
-        if (selected != null && !decided.Contains(selected)) return "「プログラム」を押して、" + selected.Name + "の魔法を組もう";
-        return "全員の行動が決まるとバトルが始まるよ";
+        if (selected != null && !decided.Contains(selected))
+        {
+            if (selected.Spell != null && goButton.gameObject.activeInHierarchy)
+            {
+                holes.Add((RectTransform)goButton.transform);
+                return "同じ魔法をもう一度使うなら「前と同じで決定」でOK！";
+            }
+            holes.Add((RectTransform)commandButtons[0].transform);
+            return "「プログラム」を押して、" + selected.Name + "の魔法を組もう";
+        }
+        return "";
     }
 
     void StepBattle(float dt)
@@ -526,6 +659,7 @@ public partial class MagicGame : MonoBehaviour
             var t = MakeText(band.rectTransform, "攻撃する敵をクリック！\n<size=22>もう一度押すと外れる・何体でも選べる</size>", 32, Color.white, TextAnchor.MiddleCenter, true);
             t.supportRichText = true;
             var ok = CommandButton(dim, "決定", 40, ConfirmTargets, true);
+            targetOkRt = (RectTransform)ok.transform;
             Anchor((RectTransform)ok.transform, 0.62f, 0.04f, 0.82f, 0.13f);
             var back = CommandButton(dim, "もどる", 32, CancelTargets, false);
             Anchor((RectTransform)back.transform, 0.84f, 0.04f, 0.98f, 0.13f);
@@ -2796,6 +2930,7 @@ public partial class MagicGame : MonoBehaviour
         var sb = send.gameObject.AddComponent<Button>();
         sb.targetGraphic = send;
         sb.onClick.AddListener(OnSend);
+        sendButtonRt = sendBorder.rectTransform;
         MakeText(send.rectTransform, "送信", 56, Ink, TextAnchor.MiddleCenter, false);
         var close = CommandButton(sideRt, "もどる", 30, () => { programScreen.SetActive(false); RefreshBattle(); }, false);
         Anchor((RectTransform)close.transform, 0.66f, 0.04f, 0.97f, 0.12f);

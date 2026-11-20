@@ -371,7 +371,7 @@ namespace MagicBattle
                 // マジカルリンクだけでも魔法になるように、置いていない所は自動で決める
                 s.AutoElement = !plain.Exists(b => b.Kind == BlockKind.Element);
                 s.Target = TargetType.All;
-                s.Power = Math.Max(10, capacity / 20 / 10 * 10);   // メモリ 20 につき威力 1（10 きざみ）
+                s.Power = Math.Max(10, MagicLinkMemory(code, capacity) / 20 / 10 * 10);   // 残りのメモリ 20 につき威力 1（10 きざみ）
                 s.Shots = 1;
             }
             foreach (var b in code) s.Code.Add(b.Clone());

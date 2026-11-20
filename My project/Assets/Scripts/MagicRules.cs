@@ -664,6 +664,10 @@ namespace MagicBattle
         public EnemySpec[] Enemies;  // 最初に出てくるウイルス
         public EnemySpec[][] Waves;  // 強敵戦：倒すと次のウイルスが出てくる（null ならふつうの依頼）
         public bool IsBoss => Waves != null && Waves.Length > 1;
+        public int Rank = 1;         // 依頼のランク（0 = チュートリアル）。そのランクが開いていれば受けられる
+        public bool Promotion;       // 昇格依頼：クリアすると次のランクの依頼が開く
+        public bool Final;           // 最終依頼（ラスボス）：クリアでゲームクリア
+        public bool Tutorial => Rank == 0;
     }
 
     public static class Requests
@@ -679,8 +683,36 @@ namespace MagicBattle
         static EnemySpec Rootkit(int hp = 1100) => Viruses.Rootkit.WithHp(hp);
         static EnemySpec Shifter(int hp = 450) => Viruses.Shifter.WithHp(hp);
 
+        public const int MaxRank = 4;
+
+        // いま受けられる最高のランク。チュートリアルをクリアするとランク1、各ランクの昇格依頼をクリアすると次のランク
+        public static int OpenRank(Func<Request, bool> cleared)
+        {
+            var tutorial = Array.Find(All, r => r.Tutorial);
+            if (tutorial != null && !cleared(tutorial)) return 0;
+            int rank = 1;
+            while (rank < MaxRank)
+            {
+                int k = rank;
+                var promo = Array.Find(All, r => r.Promotion && r.Rank == k);
+                if (promo == null || !cleared(promo)) break;
+                rank++;
+            }
+            return rank;
+        }
+
+        public static string RankName(int rank) => rank == 0 ? "チュートリアル" : "ランク" + rank;
+
         public static readonly Request[] All =
         {
+            new Request
+            {
+                Id = "t0", Client = "ナビ", Title = "はじめての依頼：テスト用のバグ", Stars = 1, Xp = 50, ParTurns = 2, Rank = 0,
+                Thanks = "おみごと！ これでマジカルコンパイルの使い方はばっちりです。ほかの依頼も受けられるようになりましたよ",
+                Message = "マジカルコンパイルへようこそ。わたしはナビ。練習用のバグを1体用意しました。画面の上の案内どおりに、魔法を組んで倒してみましょう",
+                Hint = "画面の上に出る案内のとおりに進めよう。バグは炎が弱点",
+                Enemies = new[] { Bug(160) },
+            },
             new Request
             {
                 Id = "r1", Client = "ゆうき", Title = "宿題のデータがバグだらけ！", Stars = 1, Xp = 80, ParTurns = 2,
@@ -691,7 +723,15 @@ namespace MagicBattle
             },
             new Request
             {
-                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2, Xp = 150, ParTurns = 3,
+                Id = "r6", Client = "おばあちゃん", Title = "知らないメールが止まらないの", Stars = 1, Xp = 100, ParTurns = 3,
+                Thanks = "メールが静かになったよ。孫の写真もちゃんと見られる。ありがとうねえ",
+                Message = "パソコンを開くたびに、知らない人からのメールがどんどん来るのよ。封筒みたいな顔のが走り回ってるわ",
+                Hint = "スパムはすばやいけど HP は少ない。2体以上を選ぶと全体攻撃になって、まとめて当てられる",
+                Enemies = new[] { Spam(SpamHp), Bug(BugHp1), Spam(SpamHp) },
+            },
+            new Request
+            {
+                Id = "r2", Client = "さくら", Title = "写真フォルダにワームが…", Stars = 2, Xp = 150, ParTurns = 3, Rank = 1, Promotion = true,
                 Thanks = "旅行の写真、ぜんぶ無事だった！ にょろにょろもいなくなったよ、ありがとう！",
                 Message = "旅行の写真がどんどんコピーされて、パソコンがパンパン！ 紫のにょろにょろが増えてるの",
                 Hint = "ワームは氷が弱点で、ほうっておくと回復する。すばやいスパムは「全体」の魔法でまとめて",
@@ -699,7 +739,7 @@ namespace MagicBattle
             },
             new Request
             {
-                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2, Xp = 150, ParTurns = 4,
+                Id = "r4", Client = "こうた", Title = "ゲームのセーブデータにカギが！", Stars = 2, Xp = 150, ParTurns = 4, Rank = 2,
                 Thanks = "セーブデータのカギが外れた！ 100時間のデータが助かったよ、神！",
                 Message = "セーブデータを開こうとしたら「返してほしければ…」って出てきた！ 金色のカギのやつが2体いる",
                 Hint = "ランサムは氷が弱点。攻撃されるとメモリが減るので、メモリに余裕のあるプログラムにしておこう",
@@ -707,7 +747,15 @@ namespace MagicBattle
             },
             new Request
             {
-                Id = "r5", Client = "みき", Title = "絵のデータの色がおかしい！", Stars = 3, Xp = 220, ParTurns = 4,
+                Id = "r7", Client = "けんじ", Title = "動画がカクカクで見られない", Stars = 2, Xp = 170, ParTurns = 4, Rank = 2,
+                Thanks = "動画がぬるぬる動く！ 部活の試合の動画、やっと見返せるよ。ありがとう！",
+                Message = "部活の試合の動画を見ようとしたら、止まってばっかり。にょろにょろとカギのやつが居すわってる",
+                Hint = "ワームは氷、バグは炎が弱点。ワームは回復するので先に倒そう。ランサムに攻撃されるとメモリが減る",
+                Enemies = new[] { Worm(WormHp2), Bug(BugHp3), Ransom(RansomHp) },
+            },
+            new Request
+            {
+                Id = "r5", Client = "みき", Title = "絵のデータの色がおかしい！", Stars = 3, Xp = 220, ParTurns = 4, Rank = 2, Promotion = true,
                 Thanks = "絵の色がもとにもどった！ 赤と青がくるくる変わるの、もう見たくないよ…ありがとう！",
                 Message = "描いた絵が、赤くなったり青くなったりして止まらないの。半分赤くて半分青いウイルスがいる！",
                 Hint = "シフターはターンごとに弱点が炎⇔氷で入れかわる。「もし 敵の弱点が炎 なら…」で属性を切りかえよう（装備で「もし」をはめる）",
@@ -715,7 +763,7 @@ namespace MagicBattle
             },
             new Request
             {
-                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3, Xp = 250, ParTurns = 5,
+                Id = "r3", Client = "たなか先生", Title = "成績データが乗っ取られた！", Stars = 3, Xp = 250, ParTurns = 5, Rank = 3,
                 Thanks = "成績データがもどりました。たいへん助かりました。きみたちは学校の救世主ですね",
                 Message = "職員室のパソコンに大きな一つ目のウイルスが…。成績のデータを人質にとられています。至急たのみます",
                 Hint = "トロイは炎も氷も効きにくく、全員を攻撃してくる。属性「無」が弱点。ほかのウイルスとは「もし」で打ち分けよう",
@@ -723,7 +771,15 @@ namespace MagicBattle
             },
             new Request
             {
-                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3, Xp = 400, ParTurns = 10,
+                Id = "r8", Client = "あおい", Title = "作った曲の音がぐちゃぐちゃ", Stars = 3, Xp = 260, ParTurns = 5, Rank = 3,
+                Thanks = "曲が元にもどった！ 文化祭で流す曲だったんだ。本当にありがとう！",
+                Message = "文化祭のために作った曲が、ぜんぶ変な音になっちゃった。赤と青のやつが2体と、一つ目の大きいのがいるの",
+                Hint = "シフターの弱点はターンごとに炎⇔氷。トロイは「無」が弱点。「もし」で敵ごとに属性を打ち分けよう",
+                Enemies = new[] { Shifter(ShifterHp), Troy(TroyHp), Shifter(ShifterHp) },
+            },
+            new Request
+            {
+                Id = "boss1", Client = "ネットカフェの店長", Title = "強敵戦：ウイルスの巣", Stars = 3, Xp = 400, ParTurns = 10, Rank = 3, Promotion = true,
                 Thanks = "親玉まで倒してくれたのか…！ 店のパソコンがぜんぶ動いてる。きみたちは本物だ！",
                 Message = "店じゅうのパソコンがウイルスの巣に…！ 倒しても倒しても奥から出てくる。いちばん奥に親玉がいるはずだ",
                 Hint = "3回の連戦。HP は回復しない。ウェーブごとに相手に合わせてプログラムを組み直そう。親玉ルートキットは「無」が弱点",
@@ -733,6 +789,21 @@ namespace MagicBattle
                     new[] { Bug(BugHp3), Spam(SpamHp), Bug(BugHp3) },
                     new[] { Worm(WormHp2), Shifter(ShifterHp), Ransom(RansomHp) },
                     new[] { Spam(SpamHp), Rootkit(RootkitHp), Spam(SpamHp) },
+                },
+            },
+            new Request
+            {
+                // 仮のラスボス。攻略を難しくする仕掛けは、あとで決める
+                Id = "final", Client = "？？？", Title = "最終依頼：マザーウイルス", Stars = 3, Xp = 800, ParTurns = 14, Rank = 4, Final = true,
+                Thanks = "……ウイルスの反応、すべて消えました。あなたたちが、この街のパソコンを救ったのです",
+                Message = "街じゅうのウイルスは、ひとつの親から生まれていた。そのマザーウイルスの居場所がついに分かった。これが最後の依頼だ",
+                Hint = "3回の連戦。HP は回復しない。最後は親玉ルートキットが2体。保存した魔法を使い分けよう",
+                Enemies = new[] { Troy(TroyHp), Ransom(RansomHp), Troy(TroyHp) },
+                Waves = new[]
+                {
+                    new[] { Troy(TroyHp), Ransom(RansomHp), Troy(TroyHp) },
+                    new[] { Shifter(ShifterHp), Worm(WormHp2), Shifter(ShifterHp) },
+                    new[] { Rootkit(RootkitHp), Spam(SpamHp), Rootkit(RootkitHp) },
                 },
             },
         };

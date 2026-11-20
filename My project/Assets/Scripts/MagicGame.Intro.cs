@@ -243,7 +243,7 @@ public partial class MagicGame
         IconGame(tIcon);
         var head = MakeText(toast, "マジカルコンパイル", 24, Ink, TextAnchor.UpperLeft, true);
         Anchor(head.rectTransform, 0, 1, 1, 1, 120, -54, -20, -16);
-        var body = MakeText(toast, "新しい依頼が " + Requests.All.Length + " 件届きました", 26, Ink, TextAnchor.UpperLeft, false);
+        var body = MakeText(toast, "新しい依頼が " + Mathf.Max(1, NewRequestCount()) + " 件届きました", 26, Ink, TextAnchor.UpperLeft, false);
         Anchor(body.rectTransform, 0, 0, 1, 1, 120, 16, -20, -60);
         var tb = toast.gameObject.AddComponent<Button>();   // クリックで閉じる
         tb.transition = Selectable.Transition.None;
@@ -275,7 +275,7 @@ public partial class MagicGame
     void UpdateBadges(bool show)
     {
         int n = 0;
-        foreach (var r in Requests.All) if (!IsCleared(r)) n++;
+        n = NewRequestCount();
         foreach (var b in badges)
         {
             b.go.SetActive(show && n > 0);

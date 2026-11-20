@@ -213,6 +213,17 @@ public partial class MagicGame : MonoBehaviour
 
     static bool IsCleared(Request r) => PlayerPrefs.GetInt("clear_" + r.Id, 0) == 1;
 
+    // いま受けられる最高のランク（チュートリアル → ランク1 → 昇格依頼をクリアするたびに次のランク）
+    static int OpenRank() => Requests.OpenRank(IsCleared);
+    static bool Available(Request r) => r.Rank <= OpenRank();
+    // 受けられて、まだ駆除していない依頼の数（アイコンの赤い丸）
+    static int NewRequestCount()
+    {
+        int n = 0;
+        foreach (var r in Requests.All) if (Available(r) && !IsCleared(r)) n++;
+        return n;
+    }
+
     void NewBattle()
     {
         StopAllCoroutines();
@@ -276,6 +287,59 @@ public partial class MagicGame : MonoBehaviour
             AnimateUnits();
             UpdatePointerLine();
         }
+        UpdateTutorialGuide();
+    }
+
+    // ================= チュートリアルの案内（はじめての依頼だけ、画面の上に次にやることを出す） =================
+
+    GameObject guideBox;
+    Text guideText;
+
+    void UpdateTutorialGuide()
+    {
+        bool on = battle != null && currentRequest != null && currentRequest.Tutorial && battleLayer.gameObject.activeSelf
+                  && (phase == Phase.Planning || phase == Phase.Running) && battleLayer.Find("Call") == null;
+        if (!on) { if (guideBox != null) guideBox.SetActive(false); return; }
+        if (guideBox == null)
+        {
+            var box = Img(root, UiKit.Slant(), new Color(1f, 0.85f, 0.2f, 0.97f));
+            box.type = Image.Type.Sliced;
+            box.raycastTarget = false;
+            Anchor(box.rectTransform, 0.3f, 0.885f, 0.98f, 0.975f);
+            guideBox = box.gameObject;
+            var navi = MakeText(box.rectTransform, "ナビ", 26, Color.white, TextAnchor.MiddleCenter, true);
+            AddOutline(navi, UiKit.Hex("8a5a00"), 2f);
+            Anchor(navi.rectTransform, 0.02f, 0, 0.1f, 1);
+            guideText = MakeText(box.rectTransform, "", 26, Ink, TextAnchor.MiddleLeft, true);
+            Anchor(guideText.rectTransform, 0.11f, 0, 0.97f, 1);
+        }
+        guideBox.SetActive(true);
+        guideBox.transform.SetAsLastSibling();
+        guideText.text = TutorialStep();
+    }
+
+    string TutorialStep()
+    {
+        if (phase == Phase.Running) return "タイムラインの右端に着いたキャラから行動するよ。魔法が当たるのを見守ろう！";
+        if (intro) return "ウイルスが出てきた…！";
+        if (targeting != null) return "攻撃したい敵をクリックしてロックオン！ 選んだら右下の「決定」を押そう";
+        if (programScreen.activeSelf && editing != null && !linkMode)
+        {
+            var code = CurrentCode();
+            foreach (var k in Blocks.Order)
+            {
+                if (k == BlockKind.Effect) continue;   // 追加効果は無くてもよい
+                var b = code.Find(x => x.Kind == k);
+                if (b == null)
+                    return k == BlockKind.Element
+                        ? "左の「属性」のブロックを、右のコードの「スタート」の下へドラッグしよう（バグは炎が弱点）"
+                        : "次は「" + Blocks.KindName(k) + "」のブロックを、いちばん下へドラッグしよう";
+                if (k == BlockKind.Target && b.Value == 0) return "「対象」のブロックの ▼ を押して、攻撃する敵を選ぼう";
+            }
+            return "プログラムができた！ 右下の「送信」を押して、ロボットに魔法を送ろう";
+        }
+        if (selected != null && !decided.Contains(selected)) return "「プログラム」を押して、" + selected.Name + "の魔法を組もう";
+        return "全員の行動が決まるとバトルが始まるよ";
     }
 
     void StepBattle(float dt)
@@ -2450,18 +2514,41 @@ public partial class MagicGame : MonoBehaviour
     void RebuildRequestCards()
     {
         ClearChildren(requestCards);
-        if (shownRequest == null) shownRequest = System.Array.Find(Requests.All, x => !IsCleared(x)) ?? Requests.All[0];
+        int open = OpenRank();
+        if (shownRequest == null || !Available(shownRequest))
+            shownRequest = System.Array.Find(Requests.All, x => Available(x) && !IsCleared(x)) ?? System.Array.FindLast(Requests.All, Available);
         var listBg = Img(requestCards, UiKit.RoundRect(22), new Color(1, 1, 1, 0.55f));
         listBg.type = Image.Type.Sliced;
         Anchor(listBg.rectTransform, 0, 0, 0.42f, 1);
-        var list = NewRect(listBg.rectTransform, "List");
-        Anchor(list, 0, 0, 1, 1, 12, 12, -12, -12);
-        AddVertical(list, 8);
+        var list = ScrollArea(listBg.rectTransform, 12, 12, -12, -12, 8);
+        int shownRank = -1;
         foreach (var req in Requests.All)
         {
             var r = req;
+            // ランクの見出し
+            if (r.Rank != shownRank)
+            {
+                shownRank = r.Rank;
+                bool locked = r.Rank > open;
+                string head = r.Rank >= Requests.MaxRank ? "最終依頼" : Requests.RankName(r.Rank);
+                var hd = MakeText(list, (locked ? "<color=#8a7a9e>" : "<color=#1e5cf0>") + "■ " + head + (locked ? "　（" + (r.Rank == 1 ? "チュートリアル" : Requests.RankName(r.Rank - 1) + "の昇格依頼") + "をクリアすると開く）" : "") + "</color>", 24, Ink, TextAnchor.LowerLeft, true);
+                hd.supportRichText = true;
+                hd.gameObject.AddComponent<LayoutElement>().preferredHeight = 40;
+                if (locked)
+                {
+                    // まだ受けられないランクは、鍵の付いた札を1枚だけ出す
+                    var lk = Img(list, UiKit.RoundRect(14), new Color(0.35f, 0.3f, 0.45f, 0.55f));
+                    lk.type = Image.Type.Sliced;
+                    lk.gameObject.AddComponent<LayoutElement>().preferredHeight = 70;
+                    int cnt = 0;
+                    foreach (var x in Requests.All) if (x.Rank == r.Rank) cnt++;
+                    MakeText(lk.rectTransform, "LOCKED　依頼 " + cnt + " 件", 26, Color.white, TextAnchor.MiddleCenter, true);
+                }
+            }
+            if (r.Rank > open) continue;
             bool sel = r == shownRequest;
-            var row = Img(list, UiKit.RoundRect(14), sel ? (r.IsBoss ? Magenta : Purple) : Color.white);
+            var accent = r.Final ? Magenta : r.Promotion ? UiKit.Hex("ff8a00") : r.IsBoss ? Magenta : Purple;
+            var row = Img(list, UiKit.RoundRect(14), sel ? accent : (r.Promotion || r.Final ? UiKit.Hex("fff0dc") : Color.white));
             row.type = Image.Type.Sliced;
             row.raycastTarget = true;
             row.gameObject.AddComponent<LayoutElement>().preferredHeight = 100;
@@ -2469,7 +2556,8 @@ public partial class MagicGame : MonoBehaviour
             b.targetGraphic = row;
             b.onClick.AddListener(() => { shownRequest = r; RebuildRequestCards(); });
             var tc = sel ? Color.white : Ink;
-            var t1 = MakeText(row.rectTransform, r.Client + " さんから" + (r.IsBoss ? "　<color=#ffd84a>強敵戦</color>" : ""), 20, sel ? Color.white : UiKit.Hex("6a5a80"), TextAnchor.UpperLeft, true);
+            string tag = r.Final ? "　<color=#ff3b8a>最終依頼</color>" : r.Promotion ? "　<color=#ff8a00>昇格依頼</color>" : "";
+            var t1 = MakeText(row.rectTransform, r.Client + " さんから" + (r.IsBoss ? "　<color=#ffd84a>強敵戦</color>" : "") + tag, 20, sel ? Color.white : UiKit.Hex("6a5a80"), TextAnchor.UpperLeft, true);
             t1.supportRichText = true;
             Anchor(t1.rectTransform, 0, 0, 1, 1, 18, 8, -150, -10);
             var t2 = MakeText(row.rectTransform, r.Title, 26, tc, TextAnchor.LowerLeft, true);
@@ -2481,7 +2569,7 @@ public partial class MagicGame : MonoBehaviour
 
         // 右：くわしい内容
         var r0 = shownRequest;
-        var border = Img(requestCards, UiKit.RoundRect(28), r0.IsBoss ? Magenta : Purple);
+        var border = Img(requestCards, UiKit.RoundRect(28), r0.Final || r0.IsBoss ? Magenta : r0.Promotion ? UiKit.Hex("ff8a00") : Purple);
         border.type = Image.Type.Sliced;
         Anchor(border.rectTransform, 0.44f, 0, 1, 1);
         var card = Img(border.rectTransform, UiKit.RoundRect(24), new Color(1, 1, 1, 0.96f));
@@ -2492,7 +2580,8 @@ public partial class MagicGame : MonoBehaviour
         mail.type = Image.Type.Sliced;
         Anchor(mail.rectTransform, 0, 1, 0, 1, 24, -84, 84, -24);
         MakeText(mail.rectTransform, "依頼", 22, Color.white, TextAnchor.MiddleCenter, true);
-        var from = MakeText(c, r0.Client + " さんから　" + "<color=#f0a800>" + new string('★', r0.Stars) + new string('☆', 3 - r0.Stars) + "</color>", 28, Ink, TextAnchor.MiddleLeft, true);
+        string kind = r0.Final ? "　<color=#ff3b8a>最終依頼（クリアでゲームクリア）</color>" : r0.Promotion ? "　<color=#ff8a00>昇格依頼（クリアで" + (r0.Rank + 1 >= Requests.MaxRank ? "最終依頼" : Requests.RankName(r0.Rank + 1)) + "が開く）</color>" : "";
+        var from = MakeText(c, r0.Client + " さんから　" + "<color=#f0a800>" + new string('★', r0.Stars) + new string('☆', 3 - r0.Stars) + "</color>" + kind, 28, Ink, TextAnchor.MiddleLeft, true);
         from.supportRichText = true;
         Anchor(from.rectTransform, 0, 1, 1, 1, 100, -84, -20, -24);
         var title = MakeText(c, r0.Title, 40, r0.IsBoss ? Magenta : Purple, TextAnchor.UpperLeft, true);

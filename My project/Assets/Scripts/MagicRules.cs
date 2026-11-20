@@ -59,6 +59,14 @@ namespace MagicBattle
 
         public static bool IsControl(BlockKind k) => k >= BlockKind.If;
 
+        // 対象のブロックの Value は「どの敵を選んだか」の印（1 = 1体目, 2 = 2体目, 4 = 3体目 を足したもの）
+        public static int Count(int mask)
+        {
+            int n = 0;
+            for (int m = mask; m != 0; m &= m - 1) n++;
+            return n;
+        }
+
         public static int OptionCount(BlockKind k, bool link = false)
         {
             switch (k)
@@ -67,7 +75,7 @@ namespace MagicBattle
                 case BlockKind.Repeat: return RepeatValues.Length;
                 case BlockKind.Else: case BlockKind.EndIf: case BlockKind.EndRepeat: return 1;
                 case BlockKind.Element: return 3;
-                case BlockKind.Target: return 2;
+                case BlockKind.Target: return 1;   // 対象は ▼ で切りかえず、戦闘画面で敵をクリックして選ぶ
                 case BlockKind.Power: return link ? PowerValues.Length : NormalPowerCount;
                 case BlockKind.Shots: return ShotValues.Length;
                 case BlockKind.MagicLink: return 1;
@@ -81,7 +89,7 @@ namespace MagicBattle
             switch (k)
             {
                 case BlockKind.Element: return new[] { "炎", "氷", "無" }[v];
-                case BlockKind.Target: return new[] { "1体", "全体" }[v];
+                case BlockKind.Target: return v == 0 ? "敵を選ぶ" : Count(v) + "体";
                 case BlockKind.Power: return PowerValues[v].ToString();
                 case BlockKind.Shots: return ShotValues[v].ToString();
                 case BlockKind.MagicLink: return "マジカルリンク";
@@ -134,7 +142,7 @@ namespace MagicBattle
                 case BlockKind.Repeat: return 60;
                 case BlockKind.Else: case BlockKind.EndIf: case BlockKind.EndRepeat: return 0;
                 case BlockKind.Element: return v == 2 ? 50 : 100;
-                case BlockKind.Target: return v == 0 ? 100 : 300;
+                case BlockKind.Target: return Math.Max(1, Count(v)) * 100;   // 選んだ敵 1 体につき 100
                 case BlockKind.Power: return PowerValues[v] * 3;
                 case BlockKind.Shots: return new[] { 50, 200, 400 }[v];
                 default: return v == 2 ? 200 : 150;
@@ -155,7 +163,8 @@ namespace MagicBattle
         public int Capacity;
         public bool HasControl;
         public bool AutoElement;      // マジカルリンクだけで属性のブロックが無い：ペアの得意な属性を使う
-        public TargetType Target;
+        public TargetType Target;     // 選んだ敵が 1 体なら One、2 体以上なら All（分散の特性で使う）
+        public int TargetMask;        // 選んだ敵（Enemies の何番目か。1 = 1体目, 2 = 2体目, 4 = 3体目 …）
         public int Power;
         public int Shots;
         public bool HasEffect;
@@ -165,7 +174,7 @@ namespace MagicBattle
         public string Describe()
         {
             string s = Blocks.Label(BlockKind.Element, (int)Element) + (HasElement2 ? "＋" + Blocks.Label(BlockKind.Element, (int)Element2) : "")
-                     + "・" + Blocks.Label(BlockKind.Target, (int)Target) + "・威力" + Power + "×" + Shots + "回";
+                     + "・" + (TargetMask == ~0 ? "敵全体" : Blocks.Count(TargetMask) + "体") + "・威力" + Power + "×" + Shots + "回";
             if (HasEffect) s += "・" + Blocks.Label(BlockKind.Effect, (int)Effect);
             if (LinkBonus > 1f) s += "・マジカルリンク×" + LinkBonus.ToString("0.0");
             return s;
@@ -324,6 +333,7 @@ namespace MagicBattle
                 if (b.Kind == BlockKind.Element) elements++;
                 if (b.Kind == BlockKind.MagicLink && !link) { message = "マジカルリンクはリンクプログラムだけで使えます"; return false; }
                 if (b.Kind == BlockKind.Power && b.Value >= Blocks.NormalPowerCount && !link) { message = "威力200以上はリンクプログラムだけで使えます"; return false; }
+                if (b.Kind == BlockKind.Target && b.Value == 0) { message = "攻撃する敵を選んでください（対象のブロックの ▼ を押す）"; return false; }
                 if (i == 0) continue;
                 var prev = code[i - 1];
                 if (b.Kind == prev.Kind && !(link && b.Kind == BlockKind.Element))
@@ -377,6 +387,7 @@ namespace MagicBattle
                 // マジカルリンクだけでも魔法になるように、置いていない所は自動で決める
                 s.AutoElement = !plain.Exists(b => b.Kind == BlockKind.Element);
                 s.Target = TargetType.All;
+                s.TargetMask = ~0;   // マジカルリンクは敵全体
                 s.Power = Math.Max(10, capacity / 20 / 10 * 10);   // メモリ 20 につき威力 1（10 きざみ）
                 s.Shots = 1;
             }
@@ -391,7 +402,10 @@ namespace MagicBattle
                         if (firstElement) { s.Element = (Element)b.Value; firstElement = false; }
                         else { s.HasElement2 = true; s.Element2 = (Element)b.Value; }
                         break;
-                    case BlockKind.Target: s.Target = (TargetType)b.Value; break;
+                    case BlockKind.Target:
+                        s.TargetMask = b.Value;
+                        s.Target = Blocks.Count(b.Value) >= 2 ? TargetType.All : TargetType.One;
+                        break;
                     case BlockKind.Power: s.Power = Blocks.PowerValues[b.Value]; break;
                     case BlockKind.Shots: s.Shots = Blocks.ShotValues[b.Value] * repeat; break;
                     case BlockKind.Effect: s.HasEffect = true; s.Effect = (Effect)b.Value; break;
@@ -964,6 +978,23 @@ namespace MagicBattle
             return notes;
         }
 
+        // 魔法がねらう敵：選んだ敵のうち生きているもの。全部倒れていたら、残っている最初の敵
+        public List<Unit> Targets(Spell s)
+        {
+            var list = new List<Unit>();
+            for (int i = 0; i < Enemies.Count; i++)
+                if (((s.TargetMask >> i) & 1) == 1 && Enemies[i].Alive) list.Add(Enemies[i]);
+            if (list.Count == 0) { var t = CurrentTarget(); if (t != null) list.Add(t); }
+            return list;
+        }
+
+        // 「もし」の条件で見る敵（選んだ敵の最初の 1 体）
+        public Unit FirstTarget(Spell s)
+        {
+            var list = Targets(s);
+            return list.Count > 0 ? list[0] : null;
+        }
+
         public Unit CurrentTarget()
         {
             if (TargetIndex >= 0 && TargetIndex < Enemies.Count && Enemies[TargetIndex].Alive) return Enemies[TargetIndex];
@@ -1012,16 +1043,14 @@ namespace MagicBattle
 
         void AllyAct(Unit a, ActionResult r)
         {
-            var s = a.Spell == null ? null : Compiler.Resolve(a.Spell, a, CurrentTarget(), Enemies.FindAll(x => x.Alive).Count);
+            var s = a.Spell == null ? null : Compiler.Resolve(a.Spell, a, FirstTarget(a.Spell), Enemies.FindAll(x => x.Alive).Count);
             if (a.LinkedTo != null) { r.Text = a.Name + "：" + a.LinkedTo.Name + "とリンク中（メモリを貸している）"; return; }
             if (a.Charging) { r.Text = a.Name + "：チャージ中… 次のターンにパワーアップ！"; return; }
             if (s == null) { r.Text = a.Name + "：プログラムが無いので何もしない"; return; }
             int total = 0;
             for (int shot = 0; shot < s.Shots; shot++)
             {
-                var targets = new List<Unit>();
-                if (s.Target == TargetType.All) { foreach (var e in Enemies) if (e.Alive) targets.Add(e); }
-                else { var t = CurrentTarget(); if (t != null) targets.Add(t); }
+                var targets = Targets(s);
                 foreach (var e in targets)
                 {
                     int d = Damage(a, s, e);

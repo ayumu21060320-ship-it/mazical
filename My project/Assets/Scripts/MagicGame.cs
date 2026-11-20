@@ -332,7 +332,7 @@ public partial class MagicGame : MonoBehaviour
     // 選んでいる味方からコマンドへ、ピンクの線を引く
     void UpdatePointerLine()
     {
-        bool show = phase == Phase.Planning && !intro && selected != null && views.ContainsKey(selected) && !programScreen.activeSelf;
+        bool show = phase == Phase.Planning && !intro && selected != null && views.ContainsKey(selected) && !programScreen.activeSelf && targeting == null;
         pointerLine.gameObject.SetActive(show);
         if (!show) return;
         var v = views[selected];
@@ -356,8 +356,144 @@ public partial class MagicGame : MonoBehaviour
     void OnEnemyClicked(Unit e)
     {
         if (!e.Alive) return;
-        battle.TargetIndex = battle.Enemies.IndexOf(e);
+        if (targeting == null) return;
+        // 敵を選ぶモード：クリックでロックオン、もう一度で外す
+        int i = battle.Enemies.IndexOf(e);
+        targetMask ^= 1 << i;
+        RefreshLockOn();
+    }
+
+    // ================= 攻撃する敵を選ぶ（ロックオン） =================
+
+    Block targeting;          // いま敵を選んでいる「対象」のブロック（選んでいないときは null）
+    int targetMask;           // 選んでいる敵の印
+    GameObject targetPanel;
+    readonly List<GameObject> lockMarks = new List<GameObject>();
+
+    // 敵の名前。同じ名前が何体かいれば「バグA」「バグB」と記号を付ける
+    public string EnemyName(int i)
+    {
+        if (battle == null || i < 0 || i >= battle.Enemies.Count) return "?";
+        var e = battle.Enemies[i];
+        int same = battle.Enemies.FindAll(x => x.Name == e.Name).Count;
+        if (same <= 1) return e.Name;
+        int k = 0;
+        for (int j = 0; j < i; j++) if (battle.Enemies[j].Name == e.Name) k++;
+        return e.Name + (char)('A' + k);
+    }
+
+    // 対象のブロックに出す文字（1 体なら名前、2 体以上なら「○体」）と、選んだ敵の名前の並び
+    public string TargetShort(int mask)
+    {
+        int n = Blocks.Count(mask);
+        if (n == 0) return "敵を選ぶ";
+        if (n == 1) for (int i = 0; i < 8; i++) if (((mask >> i) & 1) == 1) return EnemyName(i);
+        return n + "体";
+    }
+
+    public string TargetNames(int mask)
+    {
+        var names = new List<string>();
+        for (int i = 0; battle != null && i < battle.Enemies.Count; i++) if (((mask >> i) & 1) == 1) names.Add(EnemyName(i));
+        return string.Join("・", names);
+    }
+
+    void StartTargetSelect(Block block)
+    {
+        targeting = block;
+        targetMask = block.Value;
+        programScreen.SetActive(false);
+        if (targetPanel == null)
+        {
+            var dimImg = Img(battleLayer, null, new Color(0, 0, 0, 0.0f));
+            dimImg.raycastTarget = false;   // 下の敵をクリックできるように
+            var dim = dimImg.rectTransform;
+            Fill(dim);
+            targetPanel = dim.gameObject;
+            var band = Img(dim, UiKit.Slant(), new Color(0.05f, 0.02f, 0.08f, 0.92f));
+            band.type = Image.Type.Sliced;
+            Anchor(band.rectTransform, 0.2f, 0.84f, 0.8f, 0.94f);
+            var t = MakeText(band.rectTransform, "攻撃する敵をクリック！ <size=24>（もう一度押すと外れる・何体でも選べる）</size>", 34, Color.white, TextAnchor.MiddleCenter, true);
+            t.supportRichText = true;
+            var ok = CommandButton(dim, "決定", 40, ConfirmTargets, true);
+            Anchor((RectTransform)ok.transform, 0.62f, 0.04f, 0.82f, 0.13f);
+            var back = CommandButton(dim, "もどる", 32, CancelTargets, false);
+            Anchor((RectTransform)back.transform, 0.84f, 0.04f, 0.98f, 0.13f);
+        }
+        targetPanel.SetActive(true);
+        targetPanel.transform.SetAsLastSibling();
         RefreshBattle();
+        RefreshLockOn();
+    }
+
+    void ConfirmTargets()
+    {
+        if (targeting == null) return;
+        if (targetMask == 0) { AddLog("1体以上選んでください"); return; }
+        targeting.Value = targetMask;
+        EndTargetSelect();
+    }
+
+    void CancelTargets() => EndTargetSelect();
+
+    void EndTargetSelect()
+    {
+        targeting = null;
+        targetPanel.SetActive(false);
+        RefreshLockOn();
+        programScreen.SetActive(true);
+        RefreshProgram();
+        RefreshBattle();
+    }
+
+    // ロックオンの印：選んだ敵に、回る赤い輪と内向きの矢印と「LOCK ON」
+    void RefreshLockOn()
+    {
+        foreach (var m in lockMarks) if (m != null) Destroy(m);
+        lockMarks.Clear();
+        if (targeting == null || battle == null) return;
+        for (int i = 0; i < battle.Enemies.Count; i++)
+        {
+            var e = battle.Enemies[i];
+            if (!e.Alive || !views.TryGetValue(e, out var v)) continue;
+            bool on = ((targetMask >> i) & 1) == 1;
+            var root = NewRect(v.Art, "LockOn");
+            root.anchorMin = root.anchorMax = new Vector2(0.5f, 0.5f);
+            root.sizeDelta = Vector2.zero;
+            lockMarks.Add(root.gameObject);
+            // 名前の札（選んでいなくても出す）
+            var tag = Img(root, UiKit.Slant(), on ? HudRed : new Color(0.1f, 0.1f, 0.15f, 0.85f));
+            tag.type = Image.Type.Sliced;
+            tag.rectTransform.anchoredPosition = new Vector2(0, -v.Size.y * 0.5f - 30);
+            tag.rectTransform.sizeDelta = new Vector2(180, 46);
+            MakeText(tag.rectTransform, EnemyName(i), 28, Color.white, TextAnchor.MiddleCenter, true);
+            if (!on) continue;
+            float size = Mathf.Max(v.Size.x, v.Size.y) * 1.15f;
+            var ring = Img(root, UiKit.Ring(), HudRed).rectTransform;
+            ring.sizeDelta = new Vector2(size, size);
+            var ring2 = Img(root, UiKit.Ring(), Cyan).rectTransform;
+            ring2.sizeDelta = new Vector2(size * 0.8f, size * 0.8f);
+            ambient.StartCoroutine(SpinForever(ring, 90f));
+            ambient.StartCoroutine(SpinForever(ring2, -140f));
+            for (int k = 0; k < 4; k++)
+            {
+                var arrow = Img(ring, UiKit.Arrow(), HudRed).rectTransform;
+                arrow.anchorMin = arrow.anchorMax = new Vector2(0.5f, 0.5f);
+                float ang = k * 90f;
+                arrow.anchoredPosition = new Vector2(Mathf.Cos(ang * Mathf.Deg2Rad), Mathf.Sin(ang * Mathf.Deg2Rad)) * size * 0.58f;
+                arrow.localRotation = Quaternion.Euler(0, 0, ang + 180f);
+                arrow.sizeDelta = new Vector2(44, 34);
+            }
+            var lockText = MakeText(root, "LOCK ON", 30, HudRed, TextAnchor.MiddleCenter, true);
+            lockText.fontStyle = FontStyle.BoldAndItalic;
+            AddOutline(lockText, Color.white, 2f);
+            lockText.rectTransform.anchorMin = lockText.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            lockText.rectTransform.anchoredPosition = new Vector2(0, size * 0.5f + 20);
+            lockText.rectTransform.sizeDelta = new Vector2(240, 44);
+        }
+        // 印が敵へのクリックをさえぎらないように
+        foreach (var m in lockMarks)
+            foreach (var g in m.GetComponentsInChildren<Graphic>(true)) g.raycastTarget = false;
     }
 
     void OnProgramCommand()
@@ -644,6 +780,13 @@ public partial class MagicGame : MonoBehaviour
 
     public void OnBlockValueClicked(BlockView view)
     {
+        if (view.Data.Kind == BlockKind.Target)
+        {
+            // 対象は戦闘画面で敵をクリックして選ぶ
+            if (view.FromPalette) { programMessage.text = "対象のブロックはコードに置いてから ▼ を押して、攻撃する敵を選ぼう"; programMessage.color = Ink; return; }
+            StartTargetSelect(view.Data);
+            return;
+        }
         view.Data.Value = (view.Data.Value + 1) % Blocks.OptionCount(view.Data.Kind, linkMode);
         view.RefreshLabels();
         if (!view.FromPalette) RefreshProgram();
@@ -655,7 +798,6 @@ public partial class MagicGame : MonoBehaviour
     {
         turnText.text = "ターン" + battle.Turn + (battle.WaveCount > 1 ? "<size=30>　WAVE " + (battle.Wave + 1) + "/" + battle.WaveCount + "</size>" : "");
         turnText.supportRichText = true;
-        var target = battle.CurrentTarget();
         foreach (var kv in views)
         {
             var u = kv.Key;
@@ -675,15 +817,17 @@ public partial class MagicGame : MonoBehaviour
             }
             else
             {
-                v.Ring.gameObject.SetActive(u == target && !v.Dead);
-                v.HpText.text = "HP" + v.ShownHp;
+                int ei = battle.Enemies.IndexOf(u);
+                bool aimed = phase == Phase.Planning && selected != null && selected.Spell != null && ((selected.Spell.TargetMask >> ei) & 1) == 1;
+                v.Ring.gameObject.SetActive(aimed && !v.Dead);   // 選んでいる味方の魔法がねらう敵
+                v.HpText.text = EnemyName(ei) + "　HP" + v.ShownHp;
                 v.HpFill.fillAmount = (float)v.ShownHp / u.MaxHp;
                 v.HpBox.gameObject.SetActive(!v.Dead && !intro);
             }
         }
 
         bool plan = phase == Phase.Planning && !intro;
-        commandMenu.gameObject.SetActive(plan);
+        commandMenu.gameObject.SetActive(plan && targeting == null);
         if (selected != null)
         {
             string st = StatusOf(selected);
@@ -787,10 +931,10 @@ public partial class MagicGame : MonoBehaviour
             var s = Compiler.Build(code, cap);
             s.Partner = linkPartner;
             if (linkMode) Compiler.ApplyLinkElements(s, editing, linkPartner);
-            var t = battle.CurrentTarget();
+            var t = battle.FirstTarget(s);
             int dmg = Battle.Damage(editing, s, t);
             float eff = Battle.Effectiveness(s, t);
-            previewText.text = "見込み：1発 " + dmg + " ダメージ × " + s.Shots + "回" + (s.Target == TargetType.All ? "（敵全員）" : "（" + (t != null ? t.Name : "-") + "）")
+            previewText.text = "見込み：1発 " + dmg + " ダメージ × " + s.Shots + "回" + (s.TargetMask == ~0 ? "（敵全体）" : "（" + TargetNames(s.TargetMask) + "）")
                 + (eff > 1.01f ? "　<color=#d08000>弱点をつける！</color>" : eff < 0.99f ? "　<color=#7a80a0>効きにくい…</color>" : "");
             previewText.supportRichText = true;
         }
@@ -1979,7 +2123,7 @@ public partial class MagicGame : MonoBehaviour
             box.type = Image.Type.Sliced;
             v.HpBox = box.rectTransform;
             v.HpBox.anchoredPosition = new Vector2(0, v.Size.y + 70f);
-            v.HpBox.sizeDelta = new Vector2(170, 54);
+            v.HpBox.sizeDelta = new Vector2(250, 54);
             v.HpText = MakeText(v.HpBox, "", 34, Magenta, TextAnchor.MiddleCenter, true);
             v.HpText.fontStyle = FontStyle.BoldAndItalic;
             AddOutline(v.HpText, UiKit.Hex("3a0a30"), 2f);
@@ -2705,8 +2849,16 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
     // ▼ の中身と、右側の文字（かっこの中は使うメモリ）
     public void RefreshLabels()
     {
-        valueText.text = Blocks.Label(Data.Kind, Data.Value) + " ▼";
         string mem = Data.Kind == BlockKind.MagicLink ? "メモリ全部" : Blocks.Memory(Data.Kind, Data.Value).ToString();
+        if (Data.Kind == BlockKind.Target)
+        {
+            // 対象：1 体なら名前、2 体以上なら「○体」。右に選んだ敵の名前
+            valueText.text = game.TargetShort(Data.Value) + " ▼";
+            string names = game.TargetNames(Data.Value);
+            suffixText.text = Blocks.Suffix(Data.Kind) + (names != "" && Blocks.Count(Data.Value) >= 2 ? "<size=18>（" + names + "）</size>" : "") + "  <size=18>(" + mem + ")</size>";
+            return;
+        }
+        valueText.text = Blocks.Label(Data.Kind, Data.Value) + " ▼";
         suffixText.text = Blocks.Suffix(Data.Kind) + "  <size=18>(" + mem + ")</size>";
     }
 

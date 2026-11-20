@@ -455,6 +455,7 @@ namespace MagicBattle
         public int Capacity;      // もとのメモリ容量（チャージの分は Battle.CapacityOf で足す）
         public Spell Spell;       // 送信した魔法。null なら何もしない
         public bool Charging;     // このターンはチャージする（魔法を打たない）
+        public bool Guarding;     // このターンはガードする（魔法を打たない。受けるダメージ半分）
         public bool Charged;      // チャージした次のターン：メモリ容量と攻撃力が上がる
         public Unit LinkPartner;  // リンクプログラムで組んだ相手（魔法を打つ側が持つ）
         public Unit LinkedTo;     // リンクの相手に選ばれた（このターンは魔法を打たない）
@@ -500,6 +501,10 @@ namespace MagicBattle
         }
 
         public bool Alive => Hp > 0;
+
+        // このターン、タイムラインに出て行動するか。味方は「魔法を打つ」ときだけ
+        // （チャージ・ガード・リンクの相手・プログラムなし（何もしない）は出ない）
+        public bool OnTimeline => Alive && (!IsAlly || (Spell != null && !Charging && !Guarding && LinkedTo == null));
 
         public string TraitName()
         {
@@ -811,7 +816,7 @@ namespace MagicBattle
         public void SetSpell(Unit ally, Spell spell)
         {
             ally.Spell = spell;
-            if (spell != null) ally.Charging = false;
+            if (spell != null) { ally.Charging = false; ally.Guarding = false; }
             UpdateSpeed(ally);
         }
 
@@ -823,11 +828,21 @@ namespace MagicBattle
             ally.Speed = Compiler.Speed(s.Memory, cap) * (ally.HasMod(Modules.Clock) ? 1.15f : 1f);
         }
 
+        // ガードする：このターンは魔法を打たず、受けるダメージが半分。リンク中はできない
+        public bool SetGuard(Unit ally)
+        {
+            if (ally.LinkPartner != null || ally.LinkedTo != null) return false;
+            ally.Guarding = true;
+            ally.Charging = false;
+            return true;
+        }
+
         // チャージする／やめる。リンク中はできない
         public bool SetCharge(Unit ally, bool on)
         {
             if (ally.LinkPartner != null || ally.LinkedTo != null) return false;
             ally.Charging = on;
+            if (on) ally.Guarding = false;
             if (on) ally.Spell = null;
             UpdateSpeed(ally);
             return true;
@@ -847,6 +862,8 @@ namespace MagicBattle
             partner.Spell = null;
             partner.Charging = false;
             main.Charging = false;
+            partner.Guarding = false;
+            main.Guarding = false;
             spell.IsLink = true;
             spell.Partner = partner;
             Compiler.ApplyLinkElements(spell, main, partner);
@@ -877,7 +894,7 @@ namespace MagicBattle
         {
             get
             {
-                foreach (var u in All()) if (u.Alive && !u.Charging && !u.ActedThisTurn) return false;
+                foreach (var u in All()) if (u.OnTimeline && !u.ActedThisTurn) return false;
                 return true;
             }
         }
@@ -887,13 +904,13 @@ namespace MagicBattle
         {
             Unit best = null;
             foreach (var u in All())
-                if (u.Alive && !u.Charging && u.Gauge >= GaugeLength && (best == null || u.Gauge > best.Gauge)) best = u;
+                if (u.OnTimeline && u.Gauge >= GaugeLength && (best == null || u.Gauge > best.Gauge)) best = u;
             return best;
         }
 
         public void Advance(float dt)
         {
-            foreach (var u in All()) if (u.Alive && !u.Charging) u.Gauge += u.Speed * dt;   // チャージ中はタイムラインに出ない
+            foreach (var u in All()) if (u.OnTimeline) u.Gauge += u.Speed * dt;   // 行動しない味方はタイムラインに出ない
         }
 
         // ターンの終わり。チャージは次のターンだけ効く。リンクはそのターンだけ。お知らせを返す
@@ -925,6 +942,7 @@ namespace MagicBattle
                     notes.Add(e.Name + "が増殖して HP が " + h + " 回復した");
                 }
             }
+            foreach (var a in Allies) a.Guarding = false;   // ガードはそのターンだけ
             foreach (var a in Allies)
             {
                 a.Locked = a.LockPending && a.Alive;
@@ -1025,8 +1043,12 @@ namespace MagicBattle
             }
         }
 
-        // 防御プログラムを付けていれば、受けるダメージ -20%
-        static int Taken(Unit ally, int d) => ally.HasMod(Modules.Guard) ? Math.Max(1, (int)Math.Round(d * 0.8f)) : d;
+        // 受けるダメージ：ガード中は半分、防御プログラムを付けていれば -20%
+        static int Taken(Unit ally, int d)
+        {
+            float k = (ally.Guarding ? 0.5f : 1f) * (ally.HasMod(Modules.Guard) ? 0.8f : 1f);
+            return Math.Max(1, (int)Math.Round(d * k));
+        }
 
         void EnemyAct(Unit e, ActionResult r)
         {

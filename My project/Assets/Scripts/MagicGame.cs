@@ -101,6 +101,7 @@ public partial class MagicGame : MonoBehaviour
     readonly Dictionary<Unit, UnitView> views = new Dictionary<Unit, UnitView>();
     readonly Dictionary<Unit, (Text hp, Image fill, RectTransform box, Text status)> allyHud = new Dictionary<Unit, (Text, Image, RectTransform, Text)>();
     readonly Dictionary<Unit, RectTransform> icons = new Dictionary<Unit, RectTransform>();
+    readonly Dictionary<Unit, Image> iconPartner = new Dictionary<Unit, Image>();   // リンクのとき 2 人目の顔
     Text turnText, logText, commandTitle;
     RectTransform commandMenu, timelineBar, pointerLine, hudPanel;
     readonly List<Button> commandButtons = new List<Button>();
@@ -305,7 +306,21 @@ public partial class MagicGame : MonoBehaviour
         foreach (var kv in icons)
         {
             var u = kv.Key;
-            kv.Value.gameObject.SetActive((views.TryGetValue(u, out var v) ? !v.Dead : u.Alive) && !u.Charging);   // チャージ中は出さない
+            // 行動するキャラだけ出す（チャージ・ガード・何もしない・リンクの相手は出さない）
+            kv.Value.gameObject.SetActive((views.TryGetValue(u, out var v) ? !v.Dead : u.Alive) && u.OnTimeline);
+            if (iconPartner.TryGetValue(u, out var face2))
+            {
+                // リンクしていれば、2 人の顔が並んだ横長のアイコンにする
+                bool linked = u.LinkPartner != null;
+                kv.Value.sizeDelta = new Vector2(linked ? 120 : 70, 70);
+                kv.Value.GetComponent<Image>().color = linked ? Pink : Cyan;
+                var face1 = kv.Value.GetComponentsInChildren<Image>(true);
+                foreach (var f in face1)
+                    if (f.rectTransform.name == "Face") Anchor(f.rectTransform, 0, 0, linked ? 0.5f : 1f, 1, 4, 4, linked ? 0 : -4, -4);
+                face2.gameObject.SetActive(linked);
+                if (linked && face2.sprite == null) face2.sprite = UiKit.Art(u.LinkPartner.Art + "_idle", FaceCrop);
+                if (!linked) face2.sprite = null;
+            }
             float t = Mathf.Clamp01(u.Gauge / Battle.GaugeLength);
             var p = kv.Value.anchoredPosition;
             p.x = t * w;
@@ -379,6 +394,34 @@ public partial class MagicGame : MonoBehaviour
         if (on) { StartCoroutine(ChargeFx(views[selected], 0.5f)); Decide(selected); return; }
         decided.Remove(selected);
         RefreshBattle();
+    }
+
+    // ガード：このターンは攻撃しない代わりに、受けるダメージが半分になる
+    void OnGuardCommand()
+    {
+        if (phase != Phase.Planning || intro || selected == null || !selected.Alive) return;
+        if (decided.Contains(selected)) { AddLog(selected.Name + "の行動は決定ずみです"); return; }
+        if (selected.LinkPartner != null || selected.LinkedTo != null) { AddLog("リンク中はガードできません"); return; }
+        battle.SetGuard(selected);
+        AddLog(selected.Name + "はこのターン、ガードする（受けるダメージ半分）");
+        StartCoroutine(GuardFx(views[selected]));
+        Decide(selected);
+    }
+
+    // ガードの光（水色の盾が一瞬光る）
+    IEnumerator GuardFx(UnitView v)
+    {
+        var shield = Img(effects, UiKit.Circle(), new Color(0.4f, 0.9f, 1f, 0.5f)).rectTransform;
+        shield.sizeDelta = new Vector2(v.Size.x * 1.1f, v.Size.y * 0.9f);
+        shield.position = v.Art.TransformPoint(new Vector3(0, v.Size.y * 0.5f, 0));
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.5f)
+        {
+            if (shield == null) yield break;
+            shield.localScale = Vector3.one * (0.8f + 0.3f * t);
+            shield.GetComponent<Image>().color = new Color(0.4f, 0.9f, 1f, 0.5f * (1f - t));
+            yield return null;
+        }
+        if (shield != null) Destroy(shield.gameObject);
     }
 
     // リンクプログラム：ペアになるロボットを選ぶ
@@ -654,6 +697,7 @@ public partial class MagicGame : MonoBehaviour
             commandTitle.text = selected.Name + "　<size=22>" + selected.TraitName() + (st != "" ? "　[" + st + "]" : "") + "</size>\n<size=22>"
                 + (selected.LinkedTo != null ? selected.LinkedTo.Name + "にメモリを貸している"
                    : selected.Charging ? "このターンはチャージ"
+                   : selected.Guarding ? "このターンはガード（ダメージ半分）"
                    : selected.Spell == null ? "プログラム：まだ無い"
                    : selected.Spell.Describe() + "（" + Compiler.SpeedLabel(selected.Spell.Memory, SpellCapacity(selected)) + "）") + "</size>";
             chargeLabel.text = selected.Charging ? "チャージをやめる" : "チャージ";
@@ -671,6 +715,7 @@ public partial class MagicGame : MonoBehaviour
         if (u.LinkPartner != null) return "リンク：" + u.LinkPartner.Name;
         if (u.LinkedTo != null) return "リンク：" + u.LinkedTo.Name;
         if (u.Charging) return "チャージ中";
+        if (u.Guarding) return "ガード中";
         if (u.Locked) return "ロック中";
         if (u.Charged) return "パワーアップ";
         if (u.Spell != null) return "送信済み";
@@ -1623,12 +1668,12 @@ public partial class MagicGame : MonoBehaviour
         commandTitle = MakeText(titleBox.rectTransform, "", 30, Color.white, TextAnchor.MiddleLeft, true);
         commandTitle.supportRichText = true;
         Anchor(commandTitle.rectTransform, 0, 0, 1, 1, 16, 4, -10, -4);
-        var names = new[] { "プログラム", "アイテム", "チャージ", "リンクプログラム" };
-        var acts = new UnityEngine.Events.UnityAction[] { OnProgramCommand, () => OnNotReady("アイテム"), OnChargeCommand, OnLinkCommand };
+        var names = new[] { "プログラム", "アイテム", "チャージ", "リンクプログラム", "ガード" };
+        var acts = new UnityEngine.Events.UnityAction[] { OnProgramCommand, () => OnNotReady("アイテム"), OnChargeCommand, OnLinkCommand, OnGuardCommand };
         for (int i = 0; i < names.Length; i++)
         {
-            var b = CommandButton(commandMenu, names[i], 34, acts[i], false);
-            Anchor((RectTransform)b.transform, i * 0.03f, 0.64f - i * 0.135f, 1f, 0.76f - i * 0.135f);
+            var b = CommandButton(commandMenu, names[i], 32, acts[i], false);
+            Anchor((RectTransform)b.transform, i * 0.025f, 0.67f - i * 0.11f, 1f, 0.77f - i * 0.11f);
             var label = b.GetComponentInChildren<Text>();
             label.supportRichText = true;
             if (i == 1) label.color = new Color(0.55f, 0.6f, 0.65f);   // アイテムはまだ
@@ -1754,7 +1799,8 @@ public partial class MagicGame : MonoBehaviour
         }
 
         // タイムラインのアイコン（味方は顔でバーの上、敵はバーの下）
-        foreach (var u in battle.Allies) icons[u] = MakeIcon(UiKit.Art(u.Art + "_idle", FaceCrop), 44f, Cyan);
+        iconPartner.Clear();
+        foreach (var u in battle.Allies) icons[u] = MakeIcon(UiKit.Art(u.Art + "_idle", FaceCrop), 44f, Cyan, u);
         foreach (var e in battle.Enemies) icons[e] = MakeIcon(UiKit.Art(e.Art), -44f, Magenta);
     }
 
@@ -1822,18 +1868,31 @@ public partial class MagicGame : MonoBehaviour
         return v;
     }
 
-    RectTransform MakeIcon(Sprite sprite, float y, Color frame)
+    RectTransform MakeIcon(Sprite sprite, float y, Color frame, Unit owner = null)
     {
-        var icon = Img(timelineBar, UiKit.Circle(), frame).rectTransform;
-        icon.anchorMin = icon.anchorMax = new Vector2(0, 0.5f);
-        icon.sizeDelta = new Vector2(70, 70);
-        icon.anchoredPosition = new Vector2(0, y);
-        var inner = Img(icon, UiKit.Circle(), new Color(0.12f, 0.08f, 0.22f)).rectTransform;
-        Anchor(inner, 0, 0, 1, 1, 4, 4, -4, -4);
-        var img = Img(inner, sprite, Color.white);
+        var icon = Img(timelineBar, UiKit.RoundRect(34), frame);
+        icon.type = Image.Type.Sliced;
+        var rt = icon.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(0, 0.5f);
+        rt.sizeDelta = new Vector2(70, 70);
+        rt.anchoredPosition = new Vector2(0, y);
+        var inner = Img(rt, UiKit.RoundRect(30), new Color(0.12f, 0.08f, 0.22f));
+        inner.type = Image.Type.Sliced;
+        Anchor(inner.rectTransform, 0, 0, 1, 1, 4, 4, -4, -4);
+        var img = Img(inner.rectTransform, sprite, Color.white);
         img.preserveAspect = true;
+        img.rectTransform.name = "Face";
         Anchor(img.rectTransform, 0, 0, 1, 1, 4, 4, -4, -4);
-        return icon;
+        if (owner != null)
+        {
+            // リンクのときだけ出す 2 人目の顔（右半分）
+            var img2 = Img(inner.rectTransform, null, Color.white);
+            img2.preserveAspect = true;
+            Anchor(img2.rectTransform, 0.5f, 0, 1, 1, 0, 4, -4, -4);
+            img2.gameObject.SetActive(false);
+            iconPartner[owner] = img2;
+        }
+        return rt;
     }
 
     // 背景の電子回路の方眼（96×96 をくり返す）

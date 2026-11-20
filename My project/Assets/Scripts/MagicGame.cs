@@ -360,6 +360,8 @@ public partial class MagicGame : MonoBehaviour
         // 敵を選ぶモード：クリックでロックオン、もう一度で外す
         int i = battle.Enemies.IndexOf(e);
         targetMask ^= 1 << i;
+        targeting.Value = targetMask;   // 左のコードの「対象」ブロックにすぐ反映
+        RefreshProgram();
         RefreshLockOn();
     }
 
@@ -398,22 +400,64 @@ public partial class MagicGame : MonoBehaviour
         return string.Join("・", names);
     }
 
+    RawImage programBg;
+    GameObject programCircle, programPalette, programSide;
+    RectTransform programWin, programWinTab;
+    CanvasGroup programCodeGroup;
+    int targetOriginal;
+
+    // 敵を選ぶあいだは、プログラム画面を左半分に小さく寄せて（コードだけ）、右に戦闘画面の敵を見せる
+    void ProgramTargetLayout(bool on)
+    {
+        programBg.enabled = !on;
+        programCircle.SetActive(!on);
+        programSide.SetActive(!on);
+        programPalette.SetActive(!on);
+        programCodeGroup.blocksRaycasts = !on;   // 選んでいるあいだはコードをさわれない
+        if (on)
+        {
+            Anchor(programWin, 0.01f, 0.16f, 0.46f, 0.825f);
+            Anchor(codeArea, 0.02f, 0.03f, 0.98f, 0.97f);
+            StartCoroutine(SlideIn(programWin, -900f));
+            StartCoroutine(SlideIn(programWinTab, -900f));
+        }
+        else
+        {
+            Anchor(programWin, 0.02f, 0.03f, 0.66f, 0.825f);
+            Anchor(codeArea, 0.39f, 0.03f, 0.98f, 0.97f);
+            programWin.anchoredPosition = Vector2.zero;
+            programWinTab.anchoredPosition = Vector2.zero;
+        }
+    }
+
+    IEnumerator SlideIn(RectTransform rt, float fromX)
+    {
+        for (float t = 0; t < 1f && rt != null; t += Time.deltaTime / 0.25f)
+        {
+            float k = 1f - (1f - t) * (1f - t) * (1f - t);
+            rt.anchoredPosition = new Vector2(Mathf.Lerp(fromX, 0f, k), 0);
+            yield return null;
+        }
+        if (rt != null) rt.anchoredPosition = Vector2.zero;
+    }
+
     void StartTargetSelect(Block block)
     {
         targeting = block;
         targetMask = block.Value;
-        programScreen.SetActive(false);
+        targetOriginal = block.Value;
+        ProgramTargetLayout(true);
         if (targetPanel == null)
         {
-            var dimImg = Img(battleLayer, null, new Color(0, 0, 0, 0.0f));
+            var dimImg = Img(root, null, new Color(0, 0, 0, 0.0f));
             dimImg.raycastTarget = false;   // 下の敵をクリックできるように
             var dim = dimImg.rectTransform;
             Fill(dim);
             targetPanel = dim.gameObject;
             var band = Img(dim, UiKit.Slant(), new Color(0.05f, 0.02f, 0.08f, 0.92f));
             band.type = Image.Type.Sliced;
-            Anchor(band.rectTransform, 0.2f, 0.84f, 0.8f, 0.94f);
-            var t = MakeText(band.rectTransform, "攻撃する敵をクリック！ <size=24>（もう一度押すと外れる・何体でも選べる）</size>", 34, Color.white, TextAnchor.MiddleCenter, true);
+            Anchor(band.rectTransform, 0.48f, 0.84f, 0.99f, 0.95f);
+            var t = MakeText(band.rectTransform, "攻撃する敵をクリック！\n<size=22>もう一度押すと外れる・何体でも選べる</size>", 32, Color.white, TextAnchor.MiddleCenter, true);
             t.supportRichText = true;
             var ok = CommandButton(dim, "決定", 40, ConfirmTargets, true);
             Anchor((RectTransform)ok.transform, 0.62f, 0.04f, 0.82f, 0.13f);
@@ -434,13 +478,18 @@ public partial class MagicGame : MonoBehaviour
         EndTargetSelect();
     }
 
-    void CancelTargets() => EndTargetSelect();
+    void CancelTargets()
+    {
+        if (targeting != null) targeting.Value = targetOriginal;
+        EndTargetSelect();
+    }
 
     void EndTargetSelect()
     {
         targeting = null;
         targetPanel.SetActive(false);
         RefreshLockOn();
+        ProgramTargetLayout(false);
         programScreen.SetActive(true);
         RefreshProgram();
         RefreshBattle();
@@ -818,7 +867,7 @@ public partial class MagicGame : MonoBehaviour
             else
             {
                 int ei = battle.Enemies.IndexOf(u);
-                bool aimed = phase == Phase.Planning && selected != null && selected.Spell != null && ((selected.Spell.TargetMask >> ei) & 1) == 1;
+                bool aimed = phase == Phase.Planning && targeting == null && selected != null && selected.Spell != null && ((selected.Spell.TargetMask >> ei) & 1) == 1;
                 v.Ring.gameObject.SetActive(aimed && !v.Dead);   // 選んでいる味方の魔法がねらう敵
                 v.HpText.text = EnemyName(ei) + "　HP" + v.ShownHp;
                 v.HpFill.fillAmount = (float)v.ShownHp / u.MaxHp;
@@ -2344,7 +2393,9 @@ public partial class MagicGame : MonoBehaviour
         programScreen = screen.gameObject;
         var bg = screen.gameObject.AddComponent<RawImage>();
         bg.texture = UiKit.DiagonalGradient(UiKit.Hex("ffc3e6"), UiKit.Hex("b4e0ff"));
+        programBg = bg;
         var mc = Img(screen, UiKit.MagicCircle(), new Color(1, 1, 1, 0.35f)).rectTransform;
+        programCircle = mc.gameObject;
         mc.anchorMin = mc.anchorMax = new Vector2(0.88f, 0.2f);
         mc.sizeDelta = new Vector2(700, 700);
         ambient.StartCoroutine(SpinForever(mc, 5f));
@@ -2392,10 +2443,12 @@ public partial class MagicGame : MonoBehaviour
         var winTab = Img(screen, UiKit.TabShape(), UiKit.Hex("e9d6f7"));
         winTab.type = Image.Type.Sliced;
         Anchor(winTab.rectTransform, 0.02f, 0.815f, 0.13f, 0.87f);
+        programWinTab = winTab.rectTransform;
         MakeText(winTab.rectTransform, "コード", 26, Ink, TextAnchor.MiddleCenter, false);
         var winBorder = Img(screen, UiKit.RoundRect(28), Purple);
         winBorder.type = Image.Type.Sliced;
         Anchor(winBorder.rectTransform, 0.02f, 0.03f, 0.66f, 0.825f);
+        programWin = winBorder.rectTransform;
         var win = Img(winBorder.rectTransform, UiKit.RoundRect(24), UiKit.Hex("f7eef8"));
         win.type = Image.Type.Sliced;
         Anchor(win.rectTransform, 0, 0, 1, 1, 5, 5, -5, -5);
@@ -2404,6 +2457,7 @@ public partial class MagicGame : MonoBehaviour
         var palette = Img(win.rectTransform, UiKit.RoundRect(18), UiKit.Hex("eab8dd"));
         palette.type = Image.Type.Sliced;
         Anchor(palette.rectTransform, 0.02f, 0.03f, 0.37f, 0.97f);
+        programPalette = palette.gameObject;
         var pTitle = MakeText(palette.rectTransform, "手持ちブロック", 30, Ink, TextAnchor.UpperLeft, false);
         Anchor(pTitle.rectTransform, 0, 1, 1, 1, 18, -56, 0, -12);
         paletteList = ScrollArea(palette.rectTransform, 16, 16, -16, -70, 10);
@@ -2414,6 +2468,9 @@ public partial class MagicGame : MonoBehaviour
         codeBg.type = Image.Type.Sliced;
         Anchor(codeBg.rectTransform, 0.39f, 0.03f, 0.98f, 0.97f);
         codeArea = codeBg.rectTransform;
+        programCodeGroup = codeBg.gameObject.AddComponent<CanvasGroup>();
+        programCodeGroup.alpha = 1f;
+        programCodeGroup.blocksRaycasts = true;
         var cTitle = MakeText(codeArea, "コード", 30, Ink, TextAnchor.UpperLeft, false);
         Anchor(cTitle.rectTransform, 0, 1, 1, 1, 18, -56, 0, -12);
         codeList = ScrollArea(codeArea, 34, 16, -34, -64, -UiKit.BlockTabHeight + 2f);   // 下の出っぱりを次のブロックのへこみに重ねる
@@ -2425,6 +2482,7 @@ public partial class MagicGame : MonoBehaviour
         side.type = Image.Type.Sliced;
         var sideRt = side.rectTransform;
         Anchor(sideRt, 0.68f, 0.03f, 0.985f, 0.87f);
+        programSide = side.gameObject;
         partnerPortrait = Img(sideRt, null, new Color(0.95f, 0.95f, 1f));
         partnerPortrait.preserveAspect = true;
         Anchor(partnerPortrait.rectTransform, 0.2f, 0.55f, 0.52f, 0.86f);

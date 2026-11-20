@@ -288,6 +288,12 @@ namespace MagicBattle
         public static bool Check(List<Block> code, int capacity, out string message, bool link = false)
         {
             if (code.Count == 0) { message = "ブロックが1つもありません"; return false; }
+            // マジカルリンクは「そのブロック1つだけ」で使う（ふつうに組むか、マジカルリンクか、どちらかを選ぶ）
+            if (code.Exists(b => b.Kind == BlockKind.MagicLink) && code.Count > 1)
+            {
+                message = "マジカルリンクは1つだけで使うブロックです（ほかのブロックを外してください）";
+                return false;
+            }
             if (!StructureOk(code, out message)) return false;
             int n = Math.Min(IfCount(code), 6);
             for (int mask = 0; mask < (1 << n); mask++)
@@ -332,7 +338,7 @@ namespace MagicBattle
                 }
             }
             if (elements > 2) { message = "属性のブロックは2つまでです"; return false; }
-            // マジカルリンクはそのブロック1つで魔法が完成する（ほかのブロックは無くてもよい）
+            // マジカルリンクはそのブロック1つで魔法が完成する
             if (code.Exists(b => b.Kind == BlockKind.MagicLink)) { message = ""; return true; }
             for (var k = BlockKind.Element; k <= BlockKind.Shots; k++)
             {

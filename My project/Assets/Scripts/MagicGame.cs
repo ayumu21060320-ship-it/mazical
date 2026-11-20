@@ -447,6 +447,7 @@ public partial class MagicGame : MonoBehaviour
         targeting = block;
         targetMask = block.Value;
         targetOriginal = block.Value;
+        RefreshSaveSlots();
         StartCoroutine(SlideProgram(true));
         if (targetPanel == null)
         {
@@ -556,6 +557,176 @@ public partial class MagicGame : MonoBehaviour
     }
 
     // プログラム画面を開く。partner があればリンクプログラム
+    // ================= プログラムの保存（ロボットごとに 2 つ。名前を付けて、押すとそのプログラムになる） =================
+
+    const int SaveSlotCount = 2;
+    GameObject saveSlotsRoot, saveDialog;
+    readonly List<Text> saveSlotLabels = new List<Text>();
+    InputField saveNameField;
+    int saveDialogSlot;
+
+    static string SaveKey(Unit u, int slot) => "prog_" + u.Art + "_" + slot;
+
+    // 保存の形：「名前|種類:中身:でなければ,…」
+    static string SavedName(Unit u, int slot)
+    {
+        string v = PlayerPrefs.GetString(SaveKey(u, slot), "");
+        int bar = v.IndexOf('|');
+        return bar < 0 ? null : v.Substring(0, bar);
+    }
+
+    static List<Block> SavedCode(Unit u, int slot)
+    {
+        string v = PlayerPrefs.GetString(SaveKey(u, slot), "");
+        int bar = v.IndexOf('|');
+        if (bar < 0) return null;
+        var list = new List<Block>();
+        foreach (var part in v.Substring(bar + 1).Split(','))
+        {
+            var f = part.Split(':');
+            if (f.Length < 3) continue;
+            int kind, value, withElse;
+            if (!int.TryParse(f[0], out kind) || !int.TryParse(f[1], out value) || !int.TryParse(f[2], out withElse)) continue;
+            if (!System.Enum.IsDefined(typeof(BlockKind), kind)) continue;
+            list.Add(new Block((BlockKind)kind, value) { WithElse = withElse == 1 });
+        }
+        return list;
+    }
+
+    static void SaveCode(Unit u, int slot, string name, List<Block> code)
+    {
+        var parts = new List<string>();
+        foreach (var b in code) parts.Add((int)b.Kind + ":" + b.Value + ":" + (b.WithElse ? 1 : 0));
+        PlayerPrefs.SetString(SaveKey(u, slot), name + "|" + string.Join(",", parts));
+        PlayerPrefs.Save();
+    }
+
+    void BuildSaveSlots(RectTransform screen)
+    {
+        var bar = NewRect(screen, "SaveSlots");
+        Anchor(bar, 0.15f, 0.825f, 0.66f, 0.885f);
+        saveSlotsRoot = bar.gameObject;
+        var title = MakeText(bar, "保存した魔法", 22, Ink, TextAnchor.MiddleLeft, true);
+        Anchor(title.rectTransform, 0f, 0f, 0.17f, 1f);
+        saveSlotLabels.Clear();
+        for (int i = 0; i < SaveSlotCount; i++)
+        {
+            int slot = i;
+            float x0 = 0.18f + i * 0.41f;
+            // 押すとそのプログラムになるボタン
+            var load = Img(bar, UiKit.RoundRect(14), UiKit.Hex("ffffff"));
+            load.type = Image.Type.Sliced;
+            load.raycastTarget = true;
+            Anchor(load.rectTransform, x0, 0f, x0 + 0.29f, 1f);
+            var lb = load.gameObject.AddComponent<Button>();
+            lb.targetGraphic = load;
+            lb.onClick.AddListener(() => LoadSlot(slot));
+            var label = MakeText(load.rectTransform, "", 24, Ink, TextAnchor.MiddleCenter, true);
+            label.supportRichText = true;
+            saveSlotLabels.Add(label);
+            // 保存ボタン
+            var save = Img(bar, UiKit.RoundRect(14), Purple);
+            save.type = Image.Type.Sliced;
+            save.raycastTarget = true;
+            Anchor(save.rectTransform, x0 + 0.3f, 0f, x0 + 0.39f, 1f);
+            var sb = save.gameObject.AddComponent<Button>();
+            sb.targetGraphic = save;
+            sb.onClick.AddListener(() => OpenSaveDialog(slot));
+            MakeText(save.rectTransform, "保存", 22, Color.white, TextAnchor.MiddleCenter, true);
+        }
+    }
+
+    void RefreshSaveSlots()
+    {
+        if (saveSlotsRoot == null) return;
+        saveSlotsRoot.SetActive(!linkMode && editing != null && targeting == null);   // リンクプログラムと敵を選んでいるあいだは使わない
+        if (editing == null) return;
+        for (int i = 0; i < saveSlotLabels.Count; i++)
+        {
+            string name = SavedName(editing, i);
+            saveSlotLabels[i].text = (i == 0 ? "① " : "② ") + (name ?? "<color=#9a8aae>（空き）</color>");
+        }
+    }
+
+    void LoadSlot(int slot)
+    {
+        if (editing == null || linkMode) return;
+        var code = SavedCode(editing, slot);
+        if (code == null) { programMessage.text = "まだ保存していません。今のプログラムを「保存」で取っておこう"; programMessage.color = Ink; return; }
+        // 装備していない追加ブロックが入っていたら使えない
+        bool needIf = code.Exists(b => b.Kind == BlockKind.If || b.Kind == BlockKind.Else || b.Kind == BlockKind.EndIf);
+        bool needRepeat = code.Exists(b => b.Kind == BlockKind.Repeat || b.Kind == BlockKind.EndRepeat);
+        if ((needIf && !editing.HasMod(Modules.If)) || (needRepeat && !editing.HasMod(Modules.Repeat)))
+        {
+            programMessage.text = "装備していない追加ブロックが入っているので使えません（チーム編成で装備しよう）";
+            programMessage.color = UiKit.Hex("e0284a");
+            return;
+        }
+        // 対象の敵は戦闘ごとにちがうので、いる敵だけ残す（いなければ選び直し）
+        int alive = 0;
+        for (int i = 0; i < battle.Enemies.Count; i++) if (battle.Enemies[i].Alive) alive |= 1 << i;
+        bool reselect = false;
+        foreach (var b in code)
+            if (b.Kind == BlockKind.Target) { b.Value &= alive; if (b.Value == 0) reselect = true; }
+        drafts[editing] = code;
+        RefreshProgram();
+        programMessage.text = "「" + SavedName(editing, slot) + "」を読みこみました" + (reselect ? "。対象の ▼ で攻撃する敵を選んでね" : "");
+        programMessage.color = UiKit.Hex("1e9a4a");
+        StartCoroutine(Noise(0.12f, 0.2f));
+    }
+
+    void OpenSaveDialog(int slot)
+    {
+        if (editing == null || linkMode) return;
+        if (CurrentCode().Count == 0) { programMessage.text = "ブロックが1つもないので保存できません"; programMessage.color = UiKit.Hex("e0284a"); return; }
+        saveDialogSlot = slot;
+        if (saveDialog == null)
+        {
+            var dimImg = Img(programScreen.transform, null, new Color(0, 0, 0, 0.45f));
+            dimImg.raycastTarget = true;   // うしろを押せないように
+            Fill(dimImg.rectTransform);
+            saveDialog = dimImg.gameObject;
+            var box = Img(dimImg.rectTransform, UiKit.RoundRect(28), UiKit.Hex("f7eef8"));
+            box.type = Image.Type.Sliced;
+            Anchor(box.rectTransform, 0.3f, 0.35f, 0.7f, 0.68f);
+            var t = MakeText(box.rectTransform, "魔法に名前を付けて保存", 34, Ink, TextAnchor.MiddleCenter, true);
+            Anchor(t.rectTransform, 0.05f, 0.72f, 0.95f, 0.95f);
+            var fieldBg = Img(box.rectTransform, UiKit.RoundRect(12), Color.white);
+            fieldBg.type = Image.Type.Sliced;
+            fieldBg.raycastTarget = true;
+            Anchor(fieldBg.rectTransform, 0.08f, 0.4f, 0.92f, 0.66f);
+            var txt = MakeText(fieldBg.rectTransform, "", 36, Ink, TextAnchor.MiddleLeft, false);
+            txt.supportRichText = false;
+            Anchor(txt.rectTransform, 0, 0, 1, 1, 20, 0, -20, 0);
+            var ph = MakeText(fieldBg.rectTransform, "例：ワーム焼き", 32, UiKit.Hex("b0a4c0"), TextAnchor.MiddleLeft, false);
+            Anchor(ph.rectTransform, 0, 0, 1, 1, 20, 0, -20, 0);
+            saveNameField = fieldBg.gameObject.AddComponent<InputField>();
+            saveNameField.textComponent = txt;
+            saveNameField.placeholder = ph;
+            saveNameField.targetGraphic = fieldBg;
+            saveNameField.characterLimit = 10;
+            var ok = CommandButton(box.rectTransform, "保存", 34, ConfirmSave, true);
+            Anchor((RectTransform)ok.transform, 0.08f, 0.07f, 0.52f, 0.3f);
+            var cancel = CommandButton(box.rectTransform, "やめる", 28, () => saveDialog.SetActive(false), false);
+            Anchor((RectTransform)cancel.transform, 0.56f, 0.07f, 0.92f, 0.3f);
+        }
+        saveNameField.text = SavedName(editing, slot) ?? "";
+        saveDialog.SetActive(true);
+        saveDialog.transform.SetAsLastSibling();
+        saveNameField.ActivateInputField();
+    }
+
+    void ConfirmSave()
+    {
+        string name = (saveNameField.text ?? "").Replace("|", "").Replace(",", "").Trim();
+        if (name == "") name = "魔法" + (saveDialogSlot + 1);
+        SaveCode(editing, saveDialogSlot, name, CurrentCode());
+        saveDialog.SetActive(false);
+        RefreshSaveSlots();
+        programMessage.text = "「" + name + "」として保存しました（" + (saveDialogSlot == 0 ? "①" : "②") + "）";
+        programMessage.color = UiKit.Hex("1e9a4a");
+    }
+
     void OpenProgram(Unit main, Unit partner)
     {
         linkPicker.SetActive(false);
@@ -939,6 +1110,7 @@ public partial class MagicGame : MonoBehaviour
         headerImg.color = linkMode ? Pink : UiKit.Hex("1e5cf0");
         headerText.text = linkMode ? "リンクプログラム" : "プログラム";
         cancelLinkButton.SetActive(false);   // 決めた行動は選び直せないので、送ったリンクも取り消さない
+        RefreshSaveSlots();
         partnerPortrait.gameObject.SetActive(linkMode);
         if (linkMode) partnerPortrait.sprite = UiKit.Art(linkPartner.Art + "_idle", new RectInt(0, 0, 40, 44));
         foreach (var t in robotTabs)
@@ -2474,6 +2646,7 @@ public partial class MagicGame : MonoBehaviour
         codeList = ScrollArea(codeArea, 34, 16, -34, -64, -UiKit.BlockTabHeight + 2f);   // 下の出っぱりを次のブロックのへこみに重ねる
         MakeCapBlock(codeList, "スタート", "Start", true);
         MakeCapBlock(codeList, "フィニッシュ", "Finish", false);
+        BuildSaveSlots(screen);
 
         // 右：ロボット・メモリ・処理速度・送信
         var side = Img(screen, UiKit.RoundRect(28), new Color(1, 1, 1, 0.9f));

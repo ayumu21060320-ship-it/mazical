@@ -106,6 +106,7 @@ public partial class MagicGame : MonoBehaviour
     RectTransform commandMenu, timelineBar, pointerLine, hudPanel;
     readonly List<Button> commandButtons = new List<Button>();
     Text chargeLabel, linkLabel, goLabel;
+    Button goButton;
     // コマンドバトル：このターンの行動を決めた味方（左から順に決めていき、全員そろったらバトル開始）
     readonly HashSet<Unit> decided = new HashSet<Unit>();
     GameObject linkPicker;
@@ -510,28 +511,20 @@ public partial class MagicGame : MonoBehaviour
         if (AllDecided())
         {
             AddLog("全員の行動が決まった！ 戦闘開始！");
-            RefreshBattle();
-            StartCoroutine(AutoStart());
+            OnStartButton();   // 待たずにすぐタイムラインへ（「バトル開始」のボタンが一瞬見えないように）
             return;
         }
         AddLog(selected.Name + "の行動を選んでください");
         RefreshBattle();
     }
 
-    // 全員の行動が決まったら、少し間をおいて自動で戦闘を始める
-    IEnumerator AutoStart()
-    {
-        yield return new WaitForSeconds(0.5f);
-        if (phase == Phase.Planning && !intro && AllDecided()) OnStartButton();
-    }
-
-    // ピンクのボタン：まだ決めていない人がいれば「前と同じで決定」、全員決まったら「バトル開始」
+    // ピンクのボタン「前と同じで決定」：前のターンのプログラムのまま決める（プログラムが無いときは出さない）
     void OnGoButton()
     {
         if (phase != Phase.Planning || intro) return;
         if (AllDecided()) { OnStartButton(); return; }
         if (selected == null) return;
-        if (selected.Spell == null && !selected.Charging) AddLog(selected.Name + "はプログラムが無いので、このターンは何もしない");
+        if (selected.Spell == null) { AddLog("プログラム・チャージ・リンク・ガードから行動を選んでください"); return; }
         Decide(selected);
     }
 
@@ -704,7 +697,8 @@ public partial class MagicGame : MonoBehaviour
             int order = battle.Allies.IndexOf(selected) + 1;
             commandTitle.text = "<size=22><color=#ffd84a>" + order + "人目の行動" + (decided.Contains(selected) ? "（決定ずみ）" : "") + "</color></size>\n" + commandTitle.text;
         }
-        goLabel.text = AllDecided() ? "バトル開始" : selected != null && selected.Spell != null ? "前と同じで決定" : "何もしないで決定";
+        goLabel.text = "前と同じで決定";
+        goButton.gameObject.SetActive(plan && !AllDecided() && selected != null && selected.Spell != null && !decided.Contains(selected));
         linkLabel.text = "リンクプログラム <size=24>残り" + battle.LinksLeft + "</size>";
         foreach (var b in commandButtons) b.interactable = plan;
     }
@@ -747,7 +741,7 @@ public partial class MagicGame : MonoBehaviour
     {
         var code = CurrentCode();
         int cap = ProgramCapacity();
-        tabsRoot.gameObject.SetActive(!linkMode);
+        tabsRoot.gameObject.SetActive(false);   // ほかのキャラのタブは出さない（プログラムはそのキャラの分だけ組む）
         headerImg.color = linkMode ? Pink : UiKit.Hex("1e5cf0");
         headerText.text = linkMode ? "リンクプログラム" : "プログラム";
         cancelLinkButton.SetActive(false);   // 決めた行動は選び直せないので、送ったリンクも取り消さない
@@ -1819,6 +1813,7 @@ public partial class MagicGame : MonoBehaviour
         }
         var go = CommandButton(commandMenu, "バトル開始", 34, OnGoButton, true);
         goLabel = go.GetComponentInChildren<Text>();
+        goButton = go;
         Anchor((RectTransform)go.transform, 0.06f, 0f, 1.06f, 0.11f);
         commandButtons.Add(go);
 

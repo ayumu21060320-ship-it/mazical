@@ -156,7 +156,7 @@ public partial class MagicGame
         HideScreens();
         homeLayer.gameObject.SetActive(true);
         int n = 0;
-        foreach (var r in Requests.All) if (!IsCleared(r)) n++;
+        n = NewRequestCount();
         homeBadge.SetActive(n > 0);
         homeBadgeText.text = n.ToString();
         int mailsNew = UnreadMails();

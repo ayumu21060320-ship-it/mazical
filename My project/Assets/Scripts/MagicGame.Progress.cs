@@ -251,7 +251,10 @@ public partial class MagicGame
     {
         var r = currentRequest;
         bool first = !IsCleared(r);
+        int rankBefore = OpenRank();
         PlayerPrefs.SetInt("clear_" + r.Id, 1);
+        rankOpened = OpenRank() > rankBefore ? OpenRank() : -1;   // 昇格依頼（またはチュートリアル）で新しいランクが開いた
+        gameCleared = r.Final && first;
         // ランク：目標のターン数以内で、だれも倒れなければ S。目標＋2 ターン以内なら A。それより後は B
         bool allAlive = battle.Allies.TrueForAll(a => a.Alive);
         int rank = battle.Turn <= r.ParTurns && allAlive ? 3 : battle.Turn <= r.ParTurns + 2 ? 2 : 1;
@@ -277,6 +280,8 @@ public partial class MagicGame
     }
 
     int lastRank;
+    int rankOpened = -1;
+    bool gameCleared;
 
     IEnumerator CompleteCall(Request r, int xp, Dictionary<string, int> xpBefore, Dictionary<string, int> levelsBefore, bool gift)
     {
@@ -424,6 +429,27 @@ public partial class MagicGame
         {
             var g = MakeText(w, "メールボックスに " + r.Client + "さんからメールが届きました", 24, Pink, TextAnchor.MiddleLeft, true);
             Anchor(g.rectTransform, 0.03f, 0.04f, 0.6f, 0.11f);
+        }
+
+        // ランクが開いた・ゲームクリア
+        if (rankOpened >= 0 || gameCleared)
+        {
+            yield return new WaitForSeconds(0.3f);
+            string big = gameCleared ? "GAME CLEAR!" : "RANK UP!";
+            string small = gameCleared ? "マザーウイルスを倒した！ 街のパソコンは救われた"
+                : rankOpened >= Requests.MaxRank ? "最終依頼が受けられるようになった！"
+                : Requests.RankName(rankOpened) + "の依頼が受けられるようになった！";
+            var band = Img(w, UiKit.Slant(), gameCleared ? Magenta : UiKit.Hex("ff8a00"));
+            band.type = Image.Type.Sliced;
+            Anchor(band.rectTransform, 0.2f, 0.64f, 0.8f, 0.8f);
+            var bt = MakeText(band.rectTransform, big + "\n<size=26>" + small + "</size>", 54, Color.white, TextAnchor.MiddleCenter, true);
+            bt.supportRichText = true;
+            bt.fontStyle = FontStyle.BoldAndItalic;
+            AddOutline(bt, Color.black, 3f);
+            var brt = band.rectTransform;
+            for (float t = 0f; t < 1f; t += Time.deltaTime / 0.2f) { brt.localScale = new Vector3(1f, Mathf.Lerp(0f, 1f, t), 1f); yield return null; }
+            brt.localScale = Vector3.one;
+            StartCoroutine(ShakeRect(bw));
         }
         var home = CommandButton(w, "ホームへ", 32, ShowHome, false);
         Anchor((RectTransform)home.transform, 0.62f, 0.03f, 0.78f, 0.11f);

@@ -178,6 +178,25 @@ public static class UiKit
         return sp;
     }
 
+    // 輪（まんなかが空いた丸）。当たったときに広がる光の輪
+    public static Sprite Ring()
+    {
+        if (cache.TryGetValue("ring", out var sp)) return sp;
+        int sz = 128;
+        var t = NewTex(sz, sz);
+        for (int y = 0; y < sz; y++)
+            for (int x = 0; x < sz; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(sz / 2f, sz / 2f));
+                float a = Mathf.Clamp01(1f - Mathf.Abs(d - 54f) / 8f);
+                t.SetPixel(x, y, new Color(1, 1, 1, a * a));
+            }
+        t.Apply();
+        sp = Sprite.Create(t, new Rect(0, 0, sz, sz), new Vector2(0.5f, 0.5f));
+        cache["ring"] = sp;
+        return sp;
+    }
+
     // ぼんやりした丸（影・光）
     public static Sprite Glow()
     {

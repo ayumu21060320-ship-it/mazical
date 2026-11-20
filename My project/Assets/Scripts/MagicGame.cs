@@ -693,7 +693,7 @@ public partial class MagicGame : MonoBehaviour
         }
         if (hasRepeat) MakeBlock(paletteList, new Block(BlockKind.Repeat), true);
         paletteHint = MakeText(paletteList, linkMode
-            ? "リンク：メモリ2人分。マジカルリンクは残りのメモリを全部使うコンビ魔法。1つだけでも、ふつうのブロックといっしょでもよい"
+            ? "リンク：2人分のメモリでふつうに組むか、マジカルリンク（メモリを全部使うコンビ魔法。それ1つで完成）を置こう"
             : "ドラッグして右のコードへ。\n▼ をクリックで中身が変わる", 20, Ink, TextAnchor.UpperLeft, false);
         paletteHint.gameObject.AddComponent<LayoutElement>().preferredHeight = 70;
     }
@@ -2516,7 +2516,7 @@ public class BlockView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDra
     public void RefreshLabels()
     {
         valueText.text = Blocks.Label(Data.Kind, Data.Value) + " ▼";
-        string mem = Data.Kind == BlockKind.MagicLink ? "残り全部" : Blocks.Memory(Data.Kind, Data.Value).ToString();
+        string mem = Data.Kind == BlockKind.MagicLink ? "メモリ全部" : Blocks.Memory(Data.Kind, Data.Value).ToString();
         suffixText.text = Blocks.Suffix(Data.Kind) + "  <size=18>(" + mem + ")</size>";
     }
 

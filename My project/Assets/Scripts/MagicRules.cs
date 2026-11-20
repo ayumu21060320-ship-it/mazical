@@ -184,17 +184,18 @@ namespace MagicBattle
             return m;
         }
 
-        // 使うメモリ。マジカルリンクがあれば、メモリ容量を全部使う
+        // 使うメモリ。マジカルリンクのブロックは、それだけで使えるメモリを全部使う
+        // （なのでほかのブロックを足すとメモリオーバーになり、マジカルリンクは基本それ1つだけ置ける）
         public static int MemoryUsed(List<Block> code, int capacity)
         {
             int m = BaseMemory(code);
-            return code.Exists(b => b.Kind == BlockKind.MagicLink) ? Math.Max(m, capacity) : m;
+            return code.Exists(b => b.Kind == BlockKind.MagicLink) ? m + capacity : m;
         }
 
-        // マジカルリンクに回せるメモリ（残り全部）
-        public static int MagicLinkMemory(List<Block> code, int capacity) => Math.Max(0, capacity - BaseMemory(code));
+        // マジカルリンクが使うメモリ（使えるメモリ全部）
+        public static int MagicLinkMemory(List<Block> code, int capacity) => capacity;
 
-        // マジカルリンクの威力の倍率：残りのメモリ 2000 ごとに +1（最大 2 倍）
+        // マジカルリンクの威力の倍率：メモリ 2000 ごとに +1（最大 2 倍）
         public static float LinkBonusFor(int memory) => Math.Min(2f, 1f + memory / 2000f);
 
         // ---- 制御ブロック（もし・繰り返す） ----
@@ -300,9 +301,14 @@ namespace MagicBattle
                     return false;
                 }
             }
-            int used = BaseMemory(code);
-            if (used > capacity) { message = "メモリオーバー（" + used + " / " + capacity + "）"; return false; }
-            // マジカルリンクは残りのメモリを全部使う（残りが少なければ、威力の上がり方が小さいだけ）
+            int used = MemoryUsed(code, capacity);
+            if (used > capacity)
+            {
+                message = code.Exists(b => b.Kind == BlockKind.MagicLink)
+                    ? "メモリオーバー（マジカルリンクはメモリを全部使うので、ほかのブロックは置けません）"
+                    : "メモリオーバー（" + used + " / " + capacity + "）";
+                return false;
+            }
             message = "送信できます";
             return true;
         }
@@ -371,7 +377,7 @@ namespace MagicBattle
                 // マジカルリンクだけでも魔法になるように、置いていない所は自動で決める
                 s.AutoElement = !plain.Exists(b => b.Kind == BlockKind.Element);
                 s.Target = TargetType.All;
-                s.Power = Math.Max(10, MagicLinkMemory(code, capacity) / 20 / 10 * 10);   // 残りのメモリ 20 につき威力 1（10 きざみ）
+                s.Power = Math.Max(10, capacity / 20 / 10 * 10);   // メモリ 20 につき威力 1（10 きざみ）
                 s.Shots = 1;
             }
             foreach (var b in code) s.Code.Add(b.Clone());

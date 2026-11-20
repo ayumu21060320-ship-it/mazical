@@ -901,14 +901,15 @@ public partial class MagicGame : MonoBehaviour
             }
             var circle = MagicCircleAt(actor, color);
             if (s.IsLink) { circle.sizeDelta *= 1.5f; StartCoroutine(ChargeFx(actor, 0.4f)); }
+            yield return ChargeUp(actor, color, s.IsLink ? 0.45f : 0.28f);   // 手の先に光が集まる
             yield return Lunge(actor, 1f, 18f);
             bool big = (s.HasEffect && s.Effect == Effect.Blast) || s.IsLink;
             int n = 0;
             foreach (var h in r.Hits)
             {
                 if (h.Heal) continue;
-                StartCoroutine(Projectile(actor, h, n++ % 2 == 0 ? color : color2, big, s.HasEffect && s.Effect == Effect.Slow));
-                yield return new WaitForSeconds(0.12f);
+                StartCoroutine(Beam(actor, h, s.Element, n++ % 2 == 0 ? color : color2, color2, big, s.HasEffect && s.Effect == Effect.Slow, s.IsLink));
+                yield return new WaitForSeconds(0.16f);
             }
             if (circle2 != null) Destroy(circle2.gameObject);
             while (flying > 0) yield return null;
@@ -1008,34 +1009,169 @@ public partial class MagicGame : MonoBehaviour
         if (icon != null) icon.localScale = Vector3.one;
     }
 
-    // 魔法の弾。山なりに飛んで、当たったら Impact
-    IEnumerator Projectile(UnitView from, Hit h, Color color, bool big, bool slow)
+    // ---- 魔法のビーム ----
+
+    Vector3 HandPoint(UnitView v) => v.Art.TransformPoint(new Vector3(v.Size.x * 0.5f, v.Size.y * 0.42f, 0));
+
+    // ため：手の先に、まわりから光の粒が集まってくる
+    IEnumerator ChargeUp(UnitView v, Color color, float dur)
     {
-        flying++;
-        var glow = Img(effects, UiKit.Glow(), new Color(color.r, color.g, color.b, 0.8f)).rectTransform;
-        glow.sizeDelta = Vector2.one * (big ? 110f : 80f);
-        var orb = Img(glow, UiKit.Circle(), color).rectTransform;
-        orb.sizeDelta = Vector2.one * (big ? 34f : 24f);
-        var core = Img(orb, UiKit.Circle(), Color.white).rectTransform;
-        core.sizeDelta = Vector2.one * (big ? 16f : 11f);
-        Vector3 a = from.Art.TransformPoint(new Vector3(from.Size.x * 0.5f, from.Size.y * 0.42f, 0));
-        UnitView tv;
-        views.TryGetValue(h.Target, out tv);
-        Vector3 b = tv != null ? tv.Art.TransformPoint(new Vector3(0, tv.Size.y * 0.5f, 0)) : a;
-        float trail = 0f;
-        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.35f)
+        Vector2 hand = effects.InverseTransformPoint(HandPoint(v));
+        var dots = new List<(RectTransform rt, Vector2 from)>();
+        for (int i = 0; i < 14; i++)
         {
-            var p = Vector3.Lerp(a, b, t);
-            p.y += Mathf.Sin(t * Mathf.PI) * 90f * canvas.scaleFactor;
-            glow.position = p;
-            trail -= Time.deltaTime;
-            if (trail <= 0f) { trail = 0.025f; Burst(p, color, 1, 12f, 40f); }
+            var d = Img(effects, UiKit.Glow(), Color.Lerp(color, Color.white, 0.4f)).rectTransform;
+            d.anchorMin = d.anchorMax = new Vector2(0.5f, 0.5f);
+            d.sizeDelta = Vector2.one * Random.Range(14f, 26f);
+            var from = hand + Random.insideUnitCircle.normalized * Random.Range(90f, 160f);
+            d.anchoredPosition = from;
+            dots.Add((d, from));
+        }
+        var glow = Img(effects, UiKit.Glow(), new Color(color.r, color.g, color.b, 0.9f)).rectTransform;
+        glow.anchorMin = glow.anchorMax = new Vector2(0.5f, 0.5f);
+        glow.anchoredPosition = hand;
+        for (float t = 0f; t < 1f; t += Time.deltaTime / dur)
+        {
+            float e = t * t;
+            foreach (var d in dots) if (d.rt != null) d.rt.anchoredPosition = Vector2.Lerp(d.from, hand, e);
+            glow.sizeDelta = Vector2.one * (30f + 70f * t);
             yield return null;
         }
+        foreach (var d in dots) if (d.rt != null) Destroy(d.rt.gameObject);
         Destroy(glow.gameObject);
+    }
+
+    // ビーム：手の先から敵へ一直線に光線が伸び、当たったら光の輪と火花。白い芯・属性の色・外側の光の3重
+    IEnumerator Beam(UnitView from, Hit h, Element element, Color color, Color color2, bool big, bool slow, bool twin)
+    {
+        flying++;
+        views.TryGetValue(h.Target, out UnitView tv);
+        Vector2 a = effects.InverseTransformPoint(HandPoint(from));
+        Vector2 b = tv != null ? (Vector2)effects.InverseTransformPoint(tv.Art.TransformPoint(new Vector3(0, tv.Size.y * 0.5f, 0))) : a;
+        float dist = Vector2.Distance(a, b);
+        float angle = Mathf.Atan2(b.y - a.y, b.x - a.x) * Mathf.Rad2Deg;
+        float thick = big ? 54f : 36f;
+
+        var root = NewRect(effects, "Beam");
+        root.anchorMin = root.anchorMax = new Vector2(0.5f, 0.5f);
+        root.pivot = new Vector2(0f, 0.5f);
+        root.anchoredPosition = a;
+        root.localRotation = Quaternion.Euler(0, 0, angle);
+        var outer = BeamLayer(root, new Color(color.r, color.g, color.b, 0.35f), thick * 1.6f);
+        var mid = BeamLayer(root, color, thick);
+        RectTransform second = twin ? BeamLayer(root, new Color(color2.r, color2.g, color2.b, 0.9f), thick * 0.45f) : null;
+        var core = BeamLayer(root, Color.white, thick * 0.3f);
+
+        // 伸びる
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.07f)
+        {
+            root.sizeDelta = new Vector2(dist * t, thick);
+            yield return null;
+        }
+        root.sizeDelta = new Vector2(dist, thick);
         Impact(h, color, big);
-        if (slow && tv != null) Burst(b, new Color(0.6f, 0.6f, 1f), 8, 12f, 140f);
+        Explosion(b, element, color, big);
+        if (slow && tv != null) Burst(effects.TransformPoint(b), new Color(0.6f, 0.6f, 1f), 8, 12f, 140f);
+        StartCoroutine(ShakeStage(big ? 12f : 7f));
+
+        // ゆらめく
+        for (float t = 0f; t < 0.2f; t += Time.deltaTime)
+        {
+            float k = 1f + 0.25f * Mathf.Sin(Time.time * 70f);
+            mid.sizeDelta = new Vector2(0, thick * k);
+            core.sizeDelta = new Vector2(0, thick * 0.3f * k);
+            if (second != null) second.anchoredPosition = new Vector2(0, Mathf.Sin(Time.time * 40f) * thick * 0.35f);
+            yield return null;
+        }
+        // 細くなって消える
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.15f)
+        {
+            float k = 1f - t;
+            outer.sizeDelta = new Vector2(0, thick * 1.6f * k);
+            mid.sizeDelta = new Vector2(0, thick * k);
+            core.sizeDelta = new Vector2(0, thick * 0.3f * k);
+            if (second != null) second.sizeDelta = new Vector2(0, thick * 0.45f * k);
+            yield return null;
+        }
+        Destroy(root.gameObject);
         flying--;
+    }
+
+    // ビームの 1 枚（横に伸びる角の丸い帯）
+    RectTransform BeamLayer(RectTransform root, Color c, float height)
+    {
+        var img = Img(root, UiKit.RoundRect(16), c);
+        img.type = Image.Type.Sliced;
+        var rt = img.rectTransform;
+        rt.anchorMin = new Vector2(0, 0.5f);
+        rt.anchorMax = new Vector2(1, 0.5f);
+        rt.sizeDelta = new Vector2(0, height);
+        return rt;
+    }
+
+    // 当たったところ：大きな光・広がる光の輪・属性ごとの火花
+    void Explosion(Vector2 at, Element element, Color color, bool big)
+    {
+        var world = effects.TransformPoint(at);
+        StartCoroutine(Flash(at, Color.white, big ? 260f : 180f, 0.18f));
+        StartCoroutine(RingOut(at, color, big ? 420f : 280f));
+        if (element == Element.Fire)
+        {
+            Burst(world, UiKit.Hex("ffd84a"), big ? 18 : 10, 14f, 360f);
+            Burst(world, UiKit.Hex("ff5a1a"), big ? 14 : 8, 18f, 260f);
+        }
+        else if (element == Element.Ice)
+        {
+            Burst(world, Color.white, big ? 16 : 9, 12f, 320f);
+            Burst(world, UiKit.Hex("7fe4ff"), big ? 16 : 9, 16f, 240f);
+        }
+        else
+        {
+            Burst(world, UiKit.Hex("e8d8ff"), big ? 18 : 10, 12f, 340f);
+            Burst(world, UiKit.Hex("b07aff"), big ? 12 : 7, 16f, 240f);
+        }
+    }
+
+    IEnumerator Flash(Vector2 at, Color color, float size, float dur)
+    {
+        var f = Img(effects, UiKit.Glow(), color).rectTransform;
+        f.anchorMin = f.anchorMax = new Vector2(0.5f, 0.5f);
+        f.anchoredPosition = at;
+        var img = f.GetComponent<Image>();
+        for (float t = 0f; t < 1f; t += Time.deltaTime / dur)
+        {
+            f.sizeDelta = Vector2.one * size * (0.6f + 0.6f * t);
+            img.color = new Color(color.r, color.g, color.b, 1f - t);
+            yield return null;
+        }
+        Destroy(f.gameObject);
+    }
+
+    IEnumerator RingOut(Vector2 at, Color color, float size)
+    {
+        var r = Img(effects, UiKit.Ring(), color).rectTransform;
+        r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f);
+        r.anchoredPosition = at;
+        var img = r.GetComponent<Image>();
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.35f)
+        {
+            float e = 1f - (1f - t) * (1f - t);
+            r.sizeDelta = Vector2.one * size * (0.15f + e);
+            img.color = new Color(color.r, color.g, color.b, 1f - t);
+            yield return null;
+        }
+        Destroy(r.gameObject);
+    }
+
+    // 画面（舞台）が少しゆれる
+    IEnumerator ShakeStage(float power)
+    {
+        for (float t = 0f; t < 1f; t += Time.deltaTime / 0.18f)
+        {
+            stage.anchoredPosition = Random.insideUnitCircle * power * (1f - t);
+            yield return null;
+        }
+        stage.anchoredPosition = Vector2.zero;
     }
 
     // 当たった（回復した）ときの演出と、画面の HP の更新
